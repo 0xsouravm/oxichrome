@@ -1,0 +1,20 @@
+[package]
+name = "oxichrome"
+description = "Write Chrome extensions in Rust, compiled to WebAssembly"
+readme = "../README.md"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+oxichrome-core = { version = "0.1.0", path = "../oxichrome-core" }
+oxichrome-macros = { version = "0.1.0", path = "../oxichrome-macros" }
+wasm-bindgen = "0.2.108"
+wasm-bindgen-futures = "0.4.58"
+js-sys = "0.3.85"
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.149"
+serde-wasm-bindgen = "0.6.5"
+leptos = { version = "0.8.15", features = ["csr"] }
