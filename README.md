@@ -4,6 +4,8 @@
 [![Rust](https://img.shields.io/badge/rust-stable-orange.svg)](https://www.rust-lang.org)
 [![Manifest V3](https://img.shields.io/badge/chrome-Manifest%20V3-4285F4.svg)](https://developer.chrome.com/docs/extensions/develop/migrate/what-is-mv3)
 
+![oxichrome](assets/og.png)
+
 Write Chrome extensions entirely in Rust, compiled to WebAssembly.
 
 ---
