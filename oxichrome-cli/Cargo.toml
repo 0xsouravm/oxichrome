@@ -6,6 +6,7 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
+homepage.workspace = true
 authors.workspace = true
 
 [[bin]]
@@ -13,7 +14,7 @@ name = "cargo-oxichrome"
 path = "src/main.rs"
 
 [dependencies]
-oxichrome-build = { version = "0.1.0", path = "../oxichrome-build" }
+oxichrome-build = { version = "0.2.0", path = "../oxichrome-build" }
 clap = { version = "4.5.58", features = ["derive"] }
 anyhow = "1.0.101"
 serde_json = "1.0.149"

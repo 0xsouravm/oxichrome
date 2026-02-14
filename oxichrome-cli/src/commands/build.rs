@@ -3,9 +3,9 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use anyhow::{bail, Context, Result};
-use oxichrome_build::{manifest, shims, source_parser};
+use oxichrome_build::{Browser, manifest, shims, source_parser};
 
-pub fn run(release: bool) -> Result<()> {
+pub fn run(release: bool, browser: Browser) -> Result<()> {
     let crate_dir = std::env::current_dir()?;
     let cargo_toml_path = crate_dir.join("Cargo.toml");
 
@@ -58,7 +58,11 @@ pub fn run(release: bool) -> Result<()> {
         bail!("WASM file not found at {}", wasm_file.display());
     }
 
-    let dist_dir = crate_dir.join("dist");
+    let browser_dir = match browser {
+        Browser::Chromium => "chromium",
+        Browser::Firefox => "firefox",
+    };
+    let dist_dir = crate_dir.join("dist").join(browser_dir);
     let wasm_dist_dir = dist_dir.join("wasm");
     fs::create_dir_all(&wasm_dist_dir).context("failed to create dist/wasm directory")?;
 
@@ -85,7 +89,7 @@ pub fn run(release: bool) -> Result<()> {
     let metadata = source_parser::parse_source(&src_lib)
         .context("failed to parse extension source")?;
 
-    let manifest_json = manifest::generate_manifest(&metadata)?;
+    let manifest_json = manifest::generate_manifest(&metadata, browser)?;
     fs::write(dist_dir.join("manifest.json"), &manifest_json)
         .context("failed to write manifest.json")?;
     println!("[oxichrome] Generated manifest.json");
@@ -142,7 +146,10 @@ pub fn run(release: bool) -> Result<()> {
     }
 
     println!("[oxichrome] Build complete! Output: {}", dist_dir.display());
-    println!("[oxichrome] Load the dist/ folder as an unpacked extension in Chrome/Brave.");
+    match browser {
+        Browser::Chromium => println!("[oxichrome] Load the dist/chromium/ folder as an unpacked extension in Chrome/Brave."),
+        Browser::Firefox => println!("[oxichrome] Load the dist/firefox/ folder as a temporary extension in Firefox (about:debugging)."),
+    }
 
     Ok(())
 }

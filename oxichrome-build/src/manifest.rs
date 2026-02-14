@@ -1,5 +1,6 @@
 use serde::Serialize;
 
+use crate::Browser;
 use crate::source_parser::ExtensionMetadata;
 
 #[derive(Serialize)]
@@ -50,7 +51,7 @@ struct WebAccessibleResource {
     matches: Vec<String>,
 }
 
-pub fn generate_manifest(metadata: &ExtensionMetadata) -> anyhow::Result<String> {
+pub fn generate_manifest(metadata: &ExtensionMetadata, browser: Browser) -> anyhow::Result<String> {
     let name = metadata
         .name
         .as_deref()
@@ -94,7 +95,31 @@ pub fn generate_manifest(metadata: &ExtensionMetadata) -> anyhow::Result<String>
         }],
     };
 
-    let json = serde_json::to_string_pretty(&manifest)?;
+    let mut value = serde_json::to_value(&manifest)?;
+
+    if browser == Browser::Firefox {
+        let obj = value.as_object_mut().unwrap();
+
+        obj.insert(
+            "background".to_string(),
+            serde_json::json!({
+                "scripts": ["background.js"],
+                "type": "module"
+            }),
+        );
+
+        let gecko_id = format!("{}@oxichrome.dev", name.to_lowercase().replace(' ', "-"));
+        obj.insert(
+            "browser_specific_settings".to_string(),
+            serde_json::json!({
+                "gecko": {
+                    "id": gecko_id
+                }
+            }),
+        );
+    }
+
+    let json = serde_json::to_string_pretty(&value)?;
     Ok(json)
 }
 
@@ -102,9 +127,8 @@ pub fn generate_manifest(metadata: &ExtensionMetadata) -> anyhow::Result<String>
 mod tests {
     use super::*;
 
-    #[test]
-    fn test_generate_manifest() {
-        let metadata = ExtensionMetadata {
+    fn test_metadata() -> ExtensionMetadata {
+        ExtensionMetadata {
             name: Some("Test Extension".to_string()),
             version: Some("1.0.0".to_string()),
             description: Some("A test extension".to_string()),
@@ -113,9 +137,13 @@ mod tests {
             event_handlers: vec![],
             has_popup: true,
             has_options_page: true,
-        };
+        }
+    }
 
-        let json = generate_manifest(&metadata).unwrap();
+    #[test]
+    fn test_generate_manifest_chromium() {
+        let metadata = test_metadata();
+        let json = generate_manifest(&metadata, Browser::Chromium).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
 
         assert_eq!(parsed["manifest_version"], 3);
@@ -125,5 +153,26 @@ mod tests {
         assert_eq!(parsed["background"]["service_worker"], "background.js");
         assert_eq!(parsed["action"]["default_popup"], "popup.html");
         assert_eq!(parsed["options_ui"]["page"], "options.html");
+        assert!(parsed.get("browser_specific_settings").is_none());
+    }
+
+    #[test]
+    fn test_generate_manifest_firefox() {
+        let metadata = test_metadata();
+        let json = generate_manifest(&metadata, Browser::Firefox).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(parsed["manifest_version"], 3);
+        assert_eq!(parsed["background"]["scripts"][0], "background.js");
+        assert_eq!(parsed["background"]["type"], "module");
+        assert!(parsed["background"].get("service_worker").is_none());
+        assert_eq!(
+            parsed["content_security_policy"]["extension_pages"],
+            "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"
+        );
+        assert_eq!(
+            parsed["browser_specific_settings"]["gecko"]["id"],
+            "test-extension@oxichrome.dev"
+        );
     }
 }

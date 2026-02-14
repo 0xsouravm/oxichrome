@@ -3,10 +3,11 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Rust](https://img.shields.io/badge/rust-stable-orange.svg)](https://www.rust-lang.org)
 [![Manifest V3](https://img.shields.io/badge/chrome-Manifest%20V3-4285F4.svg)](https://developer.chrome.com/docs/extensions/develop/migrate/what-is-mv3)
+[![Website](https://img.shields.io/badge/website-oxichrome.dev-ff6600.svg)](https://oxichrome.dev)
 
 ![oxichrome](assets/og.png)
 
-Write Chrome extensions entirely in Rust, compiled to WebAssembly.
+Write browser extensions entirely in Rust, compiled to WebAssembly. Chrome and Firefox.
 
 ---
 
@@ -33,8 +34,8 @@ fn Popup() -> impl IntoView {
 ```
 
 ```sh
-cargo oxichrome build
-# Load dist/ as an unpacked extension in Chrome.
+cargo oxichrome build                  # Chrome/Edge/Brave
+cargo oxichrome build --target firefox # Firefox
 ```
 
 ---
@@ -45,6 +46,8 @@ cargo oxichrome build
 - Typed bindings to `chrome.storage`, `chrome.tabs`, `chrome.runtime`
 - Leptos for reactive popup and options page UI
 - `cargo oxichrome build` handles everything: compilation, wasm-bindgen, manifest generation, JS/HTML shim generation, static asset copying, optional wasm-opt
+- **`--target firefox`** generates a Firefox-compatible Manifest V3 extension
+- Separate `dist/chromium/` and `dist/firefox/` output directories
 
 Zero JavaScript written by hand.
 
@@ -71,18 +74,30 @@ cargo oxichrome build
 
 ```toml
 [dependencies]
-oxichrome = { version = "0.1" }
+oxichrome = { version = "0.2" }
 wasm-bindgen = "0.2"
 serde = { version = "1", features = ["derive"] }
 ```
 
-Load `dist/` in `chrome://extensions` with "Load unpacked".
+**Chrome/Edge:** Load `dist/chromium/` in `chrome://extensions` with "Load unpacked".
+
+**Firefox:** Build with `--target firefox`, then load `dist/firefox/manifest.json` in `about:debugging#/runtime/this-firefox`.
+
+## CLI commands
+
+| Command | Description |
+|---------|-------------|
+| `cargo oxichrome build` | Build for Chromium (default) |
+| `cargo oxichrome build --release` | Optimized release build |
+| `cargo oxichrome build --target firefox` | Build for Firefox |
+| `cargo oxichrome clean` | Remove the `dist/` directory |
+| `cargo oxichrome new <name>` | Scaffold a new extension project |
 
 ## Project structure
 
 ```
 oxichrome/
-├── oxichrome/            re export crate (what users depend on)
+├── oxichrome/            re-export crate (what users depend on)
 ├── oxichrome-core/       runtime: Chrome API bindings, error types, logging
 ├── oxichrome-macros/     proc macros
 ├── oxichrome-build/      source parsing, manifest/shim generation
@@ -174,15 +189,17 @@ oxichrome::runtime::send_message(&msg).await?;
 
 ```
 dist/
-├── manifest.json
-├── background.js
-├── popup.html
-├── popup.js
-├── options.html
-├── options.js
-└── wasm/
-    ├── crate_name.js
-    └── crate_name_bg.wasm
+├── chromium/                  # default target
+│   ├── manifest.json
+│   ├── background.js
+│   ├── popup.html / popup.js
+│   ├── options.html / options.js
+│   └── wasm/
+│       ├── crate_name.js
+│       └── crate_name_bg.wasm
+└── firefox/                   # --target firefox
+    ├── manifest.json          # background scripts, gecko ID
+    └── ...                    # same files as chromium/
 ```
 
 ## License
