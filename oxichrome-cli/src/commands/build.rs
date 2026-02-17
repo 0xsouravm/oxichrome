@@ -1,9 +1,10 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use which::which;
 
 use anyhow::{bail, Context, Result};
-use oxichrome_build::{Browser, manifest, shims, source_parser};
+use oxichrome_build::{manifest, shims, source_parser, Browser};
 
 pub fn run(release: bool, browser: Browser) -> Result<()> {
     let crate_dir = std::env::current_dir()?;
@@ -29,12 +30,7 @@ pub fn run(release: bool, browser: Browser) -> Result<()> {
 
     let profile = if release { "release" } else { "debug" };
     println!("[oxichrome] Running cargo build ({profile})...");
-    let mut cargo_args = vec![
-        "build",
-        "--lib",
-        "--target",
-        "wasm32-unknown-unknown",
-    ];
+    let mut cargo_args = vec!["build", "--lib", "--target", "wasm32-unknown-unknown"];
     if release {
         cargo_args.push("--release");
     }
@@ -86,8 +82,8 @@ pub fn run(release: bool, browser: Browser) -> Result<()> {
 
     let src_lib = find_lib_rs(&crate_dir)?;
     println!("[oxichrome] Parsing {}...", src_lib.display());
-    let metadata = source_parser::parse_source(&src_lib)
-        .context("failed to parse extension source")?;
+    let metadata =
+        source_parser::parse_source(&src_lib).context("failed to parse extension source")?;
 
     let manifest_json = manifest::generate_manifest(&metadata, browser)?;
     fs::write(dist_dir.join("manifest.json"), &manifest_json)
@@ -104,8 +100,7 @@ pub fn run(release: bool, browser: Browser) -> Result<()> {
         fs::write(dist_dir.join("popup.html"), &popup_html)
             .context("failed to write popup.html")?;
         let popup_js = shims::generate_popup_js(&crate_name);
-        fs::write(dist_dir.join("popup.js"), &popup_js)
-            .context("failed to write popup.js")?;
+        fs::write(dist_dir.join("popup.js"), &popup_js).context("failed to write popup.js")?;
         println!("[oxichrome] Generated popup.html + popup.js");
     }
 
@@ -122,12 +117,11 @@ pub fn run(release: bool, browser: Browser) -> Result<()> {
     let static_dir = crate_dir.join("static");
     if static_dir.is_dir() {
         println!("[oxichrome] Copying static assets...");
-        copy_dir_recursive(&static_dir, &dist_dir)
-            .context("failed to copy static assets")?;
+        copy_dir_recursive(&static_dir, &dist_dir).context("failed to copy static assets")?;
     }
 
     let wasm_output = wasm_dist_dir.join(format!("{wasm_name}_bg.wasm"));
-    if which_exists("wasm-opt") {
+    if command_in_path("wasm-opt") {
         println!("[oxichrome] Running wasm-opt...");
         let status = Command::new("wasm-opt")
             .args([
@@ -175,8 +169,8 @@ fn ensure_wasm_target() -> Result<()> {
 }
 
 fn ensure_wasm_bindgen_cli(workspace_root: &Path, crate_dir: &Path) -> Result<()> {
-    let desired_version = read_wasm_bindgen_version(workspace_root)
-        .or_else(|| read_wasm_bindgen_version(crate_dir));
+    let desired_version =
+        read_wasm_bindgen_version(workspace_root).or_else(|| read_wasm_bindgen_version(crate_dir));
 
     let output = Command::new("wasm-bindgen").arg("--version").output();
     if let Ok(output) = output {
@@ -291,10 +285,62 @@ fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<()> {
     Ok(())
 }
 
-fn which_exists(cmd: &str) -> bool {
-    Command::new("which")
-        .arg(cmd)
-        .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false)
+/// Cross-platform check for a command in PATH.
+fn command_in_path(cmd: &str) -> bool {
+    which(cmd).is_ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_extract_crate_name_basic() {
+        let content = r#"
+            [package]
+            name = "my-extension"
+            version = "0.1.0"
+        "#;
+        assert_eq!(extract_crate_name(content), Some("my-extension".into()));
+    }
+
+    #[test]
+    fn test_extract_crate_name_single_quotes() {
+        let content = r#"
+            [package]
+            name = 'weird-name_with-dashes'
+        "#;
+        assert_eq!(
+            extract_crate_name(content),
+            Some("weird-name_with-dashes".into())
+        );
+    }
+
+    #[test]
+    fn test_extract_crate_name_not_found() {
+        let content = r#"[package] version = "0.1.0""#;
+        assert_eq!(extract_crate_name(content), None);
+    }
+
+    #[test]
+    fn test_extract_crate_name_ignores_other_sections() {
+        let content = r#"
+            [dependencies]
+            anyhow = "1"
+
+            [package]
+            name = "test-crate"
+        "#;
+        assert_eq!(extract_crate_name(content), Some("test-crate".into()));
+    }
+
+    #[test]
+    fn test_command_in_path_exist() {
+        assert!(command_in_path("cargo"));
+    }
+
+    #[test]
+    fn test_command_in_path_dont_exist() {
+        assert!(!command_in_path("nonexistent-command"));
+    }
 }
