@@ -19,6 +19,8 @@ struct Manifest {
     #[serde(skip_serializing_if = "Option::is_none")]
     options_ui: Option<OptionsUi>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
+    content_scripts: Vec<ContentScriptEntry>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     web_accessible_resources: Vec<WebAccessibleResource>,
 }
 
@@ -43,6 +45,12 @@ struct ContentSecurityPolicy {
 struct OptionsUi {
     page: String,
     open_in_tab: bool,
+}
+
+#[derive(Serialize)]
+struct ContentScriptEntry {
+    matches: Vec<String>,
+    js: Vec<String>,
 }
 
 #[derive(Serialize)]
@@ -89,6 +97,12 @@ pub fn generate_manifest(metadata: &ExtensionMetadata, browser: Browser) -> anyh
         } else {
             None
         },
+        content_scripts: metadata.content_scripts.iter().map(|cs| {
+            ContentScriptEntry {
+                matches: cs.matches.clone(),
+                js: vec![format!("content_script_{}.js", cs.fn_name)],
+            }
+        }).collect(),
         web_accessible_resources: vec![WebAccessibleResource {
             resources: vec!["wasm/*".to_string()],
             matches: vec!["<all_urls>".to_string()],
@@ -137,6 +151,7 @@ mod tests {
             event_handlers: vec![],
             has_popup: true,
             has_options_page: true,
+            content_scripts: vec![],
         }
     }
 
@@ -154,6 +169,33 @@ mod tests {
         assert_eq!(parsed["action"]["default_popup"], "popup.html");
         assert_eq!(parsed["options_ui"]["page"], "options.html");
         assert!(parsed.get("browser_specific_settings").is_none());
+    }
+
+    #[test]
+    fn test_generate_manifest_with_content_scripts() {
+        use crate::source_parser::ContentScript;
+
+        let metadata = ExtensionMetadata {
+            name: Some("Test".to_string()),
+            version: Some("1.0.0".to_string()),
+            description: None,
+            permissions: vec![],
+            background_functions: vec![],
+            event_handlers: vec![],
+            has_popup: false,
+            has_options_page: false,
+            content_scripts: vec![
+                ContentScript {
+                    fn_name: "inject".to_string(),
+                    matches: vec!["<all_urls>".to_string()],
+                },
+            ],
+        };
+        let json = generate_manifest(&metadata, Browser::Chromium).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(parsed["content_scripts"][0]["matches"][0], "<all_urls>");
+        assert_eq!(parsed["content_scripts"][0]["js"][0], "content_script_inject.js");
     }
 
     #[test]

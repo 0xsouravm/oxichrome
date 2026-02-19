@@ -119,6 +119,14 @@ pub fn run(release: bool, browser: Browser) -> Result<()> {
         println!("[oxichrome] Generated options.html + options.js");
     }
 
+    for cs in &metadata.content_scripts {
+        let cs_js = shims::generate_content_script_js(&cs.fn_name, &crate_name);
+        let cs_filename = format!("content_script_{}.js", cs.fn_name);
+        fs::write(dist_dir.join(&cs_filename), &cs_js)
+            .with_context(|| format!("failed to write {cs_filename}"))?;
+        println!("[oxichrome] Generated {cs_filename}");
+    }
+
     let static_dir = crate_dir.join("static");
     if static_dir.is_dir() {
         println!("[oxichrome] Copying static assets...");

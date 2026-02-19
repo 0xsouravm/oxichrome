@@ -62,3 +62,16 @@ pub fn options_page(_attr: TokenStream, item: TokenStream) -> TokenStream {
         .unwrap_or_else(|e| e.into_compile_error())
         .into()
 }
+
+/// ```ignore
+/// #[oxichrome::content_script(matches = ["<all_urls>"])]
+/// async fn inject() {
+///     // runs in web page context
+/// }
+/// ```
+#[proc_macro_attribute]
+pub fn content_script(attr: TokenStream, item: TokenStream) -> TokenStream {
+    codegen::content_script::expand(attr.into(), item.into())
+        .unwrap_or_else(|e| e.into_compile_error())
+        .into()
+}

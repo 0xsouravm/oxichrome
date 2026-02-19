@@ -14,6 +14,7 @@ pub struct ExtensionMetadata {
     pub event_handlers: Vec<EventHandler>,
     pub has_popup: bool,
     pub has_options_page: bool,
+    pub content_scripts: Vec<ContentScript>,
 }
 
 #[derive(Debug)]
@@ -21,6 +22,12 @@ pub struct EventHandler {
     pub fn_name: String,
     pub namespace: String,
     pub event_name: String,
+}
+
+#[derive(Debug)]
+pub struct ContentScript {
+    pub fn_name: String,
+    pub matches: Vec<String>,
 }
 
 struct MetadataVisitor {
@@ -81,6 +88,29 @@ impl MetadataVisitor {
                 }
             }
         }
+    }
+
+    fn parse_content_script_args(&self, attr: &Attribute) -> Option<Vec<String>> {
+        let nested = attr.parse_args_with(
+            syn::punctuated::Punctuated::<Meta, syn::Token![,]>::parse_terminated,
+        ).ok()?;
+
+        for meta in &nested {
+            if let Meta::NameValue(MetaNameValue { path, value, .. }) = meta {
+                if path.is_ident("matches") {
+                    if let Expr::Array(arr) = value {
+                        let mut matches = Vec::new();
+                        for elem in &arr.elems {
+                            if let Expr::Lit(ExprLit { lit: Lit::Str(s), .. }) = elem {
+                                matches.push(s.value());
+                            }
+                        }
+                        return Some(matches);
+                    }
+                }
+            }
+        }
+        None
     }
 
     fn parse_event_args(&self, attr: &Attribute) -> Option<(String, String)> {
@@ -144,6 +174,14 @@ impl<'ast> Visit<'ast> for MetadataVisitor {
             if Self::is_oxichrome_attr(attr, "options_page") {
                 self.metadata.has_options_page = true;
             }
+            if Self::is_oxichrome_attr(attr, "content_script") {
+                if let Some(matches) = self.parse_content_script_args(attr) {
+                    self.metadata.content_scripts.push(ContentScript {
+                        fn_name: node.sig.ident.to_string(),
+                        matches,
+                    });
+                }
+            }
         }
         syn::visit::visit_item_fn(self, node);
     }
@@ -200,5 +238,30 @@ mod tests {
         assert_eq!(metadata.event_handlers[0].event_name, "on_installed");
         assert!(metadata.has_popup);
         assert!(metadata.has_options_page);
+        assert!(metadata.content_scripts.is_empty());
+    }
+
+    #[test]
+    fn test_parse_content_script() {
+        let source = r#"
+            #[oxichrome::extension(
+                name = "Test",
+                version = "1.0.0"
+            )]
+            struct MyExt;
+
+            #[oxichrome::content_script(matches = ["<all_urls>"])]
+            async fn inject() {}
+
+            #[oxichrome::content_script(matches = ["https://example.com/*", "https://test.com/*"])]
+            async fn inject_specific() {}
+        "#;
+
+        let metadata = parse_source_str(source).unwrap();
+        assert_eq!(metadata.content_scripts.len(), 2);
+        assert_eq!(metadata.content_scripts[0].fn_name, "inject");
+        assert_eq!(metadata.content_scripts[0].matches, vec!["<all_urls>"]);
+        assert_eq!(metadata.content_scripts[1].fn_name, "inject_specific");
+        assert_eq!(metadata.content_scripts[1].matches, vec!["https://example.com/*", "https://test.com/*"]);
     }
 }

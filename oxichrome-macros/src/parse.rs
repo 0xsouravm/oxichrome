@@ -54,10 +54,16 @@ impl Parse for ExtensionArgs {
         }
 
         let name = name.ok_or_else(|| {
-            syn::Error::new(proc_macro2::Span::call_site(), "missing required argument `name`")
+            syn::Error::new(
+                proc_macro2::Span::call_site(),
+                "missing required argument `name`",
+            )
         })?;
         let version = version.ok_or_else(|| {
-            syn::Error::new(proc_macro2::Span::call_site(), "missing required argument `version`")
+            syn::Error::new(
+                proc_macro2::Span::call_site(),
+                "missing required argument `version`",
+            )
         })?;
 
         Ok(ExtensionArgs {
@@ -88,6 +94,73 @@ impl Parse for EventArgs {
     }
 }
 
+#[derive(Debug)]
+pub struct ContentScriptArgs {
+    pub matches: Vec<LitStr>,
+}
+
+impl Parse for ContentScriptArgs {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        let mut matches: Vec<LitStr> = Vec::new();
+
+        while !input.is_empty() {
+            let key: Ident = input.parse()?;
+            input.parse::<Token![=]>()?;
+
+            match key.to_string().as_str() {
+                "matches" => {
+                    let content;
+                    syn::bracketed!(content in input);
+                    while !content.is_empty() {
+                        matches.push(content.parse()?);
+                        if !content.is_empty() {
+                            content.parse::<Token![,]>()?;
+                        }
+                    }
+                }
+                other => {
+                    return Err(syn::Error::new(
+                        key.span(),
+                        format!("unknown argument `{other}`"),
+                    ));
+                }
+            }
+
+            if !input.is_empty() {
+                input.parse::<Token![,]>()?;
+            }
+        }
+
+        if matches.is_empty() {
+            return Err(syn::Error::new(
+                proc_macro2::Span::call_site(),
+                "missing required argument `matches`",
+            ));
+        }
+
+        for pattern in &matches {
+            let val = pattern.value();
+            if val != "<all_urls>"
+                && !val.starts_with("http://")
+                && !val.starts_with("https://")
+                && !val.starts_with("*://")
+                && !val.starts_with("file://")
+                && !val.starts_with("ftp://")
+            {
+                return Err(syn::Error::new(
+                    pattern.span(),
+                    format!(
+                        "invalid match pattern `{val}`: must start with a scheme \
+                         (e.g. `https://`, `*://`, `http://`) or be `<all_urls>`"
+                    ),
+                ));
+            }
+        }
+
+        Ok(ContentScriptArgs { matches })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -113,5 +186,44 @@ mod tests {
         let args: EventArgs = syn::parse2(tokens).unwrap();
         assert_eq!(args.namespace.to_string(), "runtime");
         assert_eq!(args.event_name.to_string(), "on_installed");
+    }
+
+    #[test]
+    fn parse_content_script_args() {
+        let tokens: proc_macro2::TokenStream = quote::quote! {
+            matches = ["<all_urls>"]
+        };
+        let args: ContentScriptArgs = syn::parse2(tokens).unwrap();
+        assert_eq!(args.matches.len(), 1);
+        assert_eq!(args.matches[0].value(), "<all_urls>");
+    }
+
+    #[test]
+    fn parse_content_script_args_multiple() {
+        let tokens: proc_macro2::TokenStream = quote::quote! {
+            matches = ["https://example.com/*", "https://test.com/*"]
+        };
+        let args: ContentScriptArgs = syn::parse2(tokens).unwrap();
+        assert_eq!(args.matches.len(), 2);
+        assert_eq!(args.matches[0].value(), "https://example.com/*");
+        assert_eq!(args.matches[1].value(), "https://test.com/*");
+    }
+
+    #[test]
+    fn parse_content_script_args_wildcard_scheme() {
+        let tokens: proc_macro2::TokenStream = quote::quote! {
+            matches = ["*://*.youtube.com/*"]
+        };
+        let args: ContentScriptArgs = syn::parse2(tokens).unwrap();
+        assert_eq!(args.matches[0].value(), "*://*.youtube.com/*");
+    }
+
+    #[test]
+    fn parse_content_script_args_invalid_pattern() {
+        let tokens: proc_macro2::TokenStream = quote::quote! {
+            matches = ["youtube.com/*"]
+        };
+        let err = syn::parse2::<ContentScriptArgs>(tokens).unwrap_err();
+        assert!(err.to_string().contains("must start with a scheme"));
     }
 }
