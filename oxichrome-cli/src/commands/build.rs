@@ -285,7 +285,6 @@ fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Cross-platform check for a command in PATH.
 fn command_in_path(cmd: &str) -> bool {
     which(cmd).is_ok()
 }
