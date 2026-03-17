@@ -1,6 +1,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use toml::Value;
 use which::which;
 
 use anyhow::{bail, Context, Result};
@@ -237,15 +238,13 @@ fn find_lib_rs(crate_dir: &Path) -> Result<PathBuf> {
 }
 
 fn extract_crate_name(content: &str) -> Option<String> {
-    for line in content.lines() {
-        let trimmed = line.trim();
-        if trimmed.starts_with("name") && trimmed.contains('=') {
-            let value = trimmed.split('=').nth(1)?.trim();
-            let name = value.trim_matches('"').trim_matches('\'');
-            return Some(name.to_string());
-        }
-    }
-    None
+    let parsed: Value = toml::from_str(content).ok()?;
+
+    parsed
+        .get("package")?
+        .get("name")?
+        .as_str()
+        .map(|s| s.to_string())
 }
 
 fn get_target_dir() -> Result<PathBuf> {
@@ -326,6 +325,18 @@ mod tests {
         let content = r#"
             [dependencies]
             anyhow = "1"
+
+            [package]
+            name = "test-crate"
+        "#;
+        assert_eq!(extract_crate_name(content), Some("test-crate".into()));
+    }
+
+    #[test]
+    fn test_extract_crate_name_does_not_pick_wrong_section() {
+        let content = r#"
+            [dependencies]
+            name-anyhow = "1"
 
             [package]
             name = "test-crate"
