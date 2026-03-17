@@ -2,6 +2,7 @@ pub use oxichrome_macros::{extension, background, on, popup, options_page, conte
 
 pub use oxichrome_core as core;
 
+pub use oxichrome_core::content_script::RunAt;
 pub use oxichrome_core::error::{OxichromeError, Result};
 pub use oxichrome_core::runtime;
 pub use oxichrome_core::storage;

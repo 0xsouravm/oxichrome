@@ -7,6 +7,8 @@ use crate::parse::ContentScriptArgs;
 pub fn expand(attr: TokenStream, item: TokenStream) -> Result<TokenStream, syn::Error> {
     let args: ContentScriptArgs = syn::parse2(attr)?;
     let _matches = args.matches;
+    let _all_frames = args.all_frames;
+    let _css = args.css;
     let func: ItemFn = syn::parse2(item)?;
 
     if func.sig.asyncness.is_none() {
@@ -26,7 +28,16 @@ pub fn expand(attr: TokenStream, item: TokenStream) -> Result<TokenStream, syn::
         fn_name.span(),
     );
 
+    let run_at_check = args.run_at.map(|variant| {
+        quote! {
+            #[doc(hidden)]
+            const _: oxichrome::RunAt = oxichrome::RunAt::#variant;
+        }
+    });
+
     Ok(quote! {
+        #run_at_check
+
         #(#attrs)*
         #vis async fn #fn_name() #fn_body
 

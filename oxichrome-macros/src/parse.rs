@@ -1,5 +1,5 @@
 use syn::parse::{Parse, ParseStream};
-use syn::{Ident, LitStr, Token};
+use syn::{Ident, LitBool, LitStr, Token};
 
 #[derive(Debug)]
 pub struct ExtensionArgs {
@@ -97,11 +97,17 @@ impl Parse for EventArgs {
 #[derive(Debug)]
 pub struct ContentScriptArgs {
     pub matches: Vec<LitStr>,
+    pub run_at: Option<Ident>,
+    pub all_frames: Option<bool>,
+    pub css: Vec<LitStr>,
 }
 
 impl Parse for ContentScriptArgs {
     fn parse(input: ParseStream) -> syn::Result<Self> {
         let mut matches: Vec<LitStr> = Vec::new();
+        let mut run_at: Option<Ident> = None;
+        let mut all_frames: Option<bool> = None;
+        let mut css: Vec<LitStr> = Vec::new();
 
         while !input.is_empty() {
             let key: Ident = input.parse()?;
@@ -113,6 +119,24 @@ impl Parse for ContentScriptArgs {
                     syn::bracketed!(content in input);
                     while !content.is_empty() {
                         matches.push(content.parse()?);
+                        if !content.is_empty() {
+                            content.parse::<Token![,]>()?;
+                        }
+                    }
+                }
+                "run_at" => {
+                    let value: Ident = input.parse()?;
+                    run_at = Some(value);
+                }
+                "all_frames" => {
+                    let value: LitBool = input.parse()?;
+                    all_frames = Some(value.value());
+                }
+                "css" => {
+                    let content;
+                    syn::bracketed!(content in input);
+                    while !content.is_empty() {
+                        css.push(content.parse()?);
                         if !content.is_empty() {
                             content.parse::<Token![,]>()?;
                         }
@@ -157,7 +181,12 @@ impl Parse for ContentScriptArgs {
             }
         }
 
-        Ok(ContentScriptArgs { matches })
+        Ok(ContentScriptArgs {
+            matches,
+            run_at,
+            all_frames,
+            css,
+        })
     }
 }
 
@@ -225,5 +254,52 @@ mod tests {
         };
         let err = syn::parse2::<ContentScriptArgs>(tokens).unwrap_err();
         assert!(err.to_string().contains("must start with a scheme"));
+    }
+
+    #[test]
+    fn parse_content_script_args_with_run_at() {
+        let tokens: proc_macro2::TokenStream = quote::quote! {
+            matches = ["<all_urls>"],
+            run_at = DocumentStart
+        };
+        let args: ContentScriptArgs = syn::parse2(tokens).unwrap();
+        assert_eq!(args.run_at.unwrap().to_string(), "DocumentStart");
+    }
+
+    #[test]
+    fn parse_content_script_args_with_all_frames() {
+        let tokens: proc_macro2::TokenStream = quote::quote! {
+            matches = ["<all_urls>"],
+            all_frames = true
+        };
+        let args: ContentScriptArgs = syn::parse2(tokens).unwrap();
+        assert_eq!(args.all_frames, Some(true));
+    }
+
+    #[test]
+    fn parse_content_script_args_with_css() {
+        let tokens: proc_macro2::TokenStream = quote::quote! {
+            matches = ["<all_urls>"],
+            css = ["styles.css", "theme.css"]
+        };
+        let args: ContentScriptArgs = syn::parse2(tokens).unwrap();
+        assert_eq!(args.css.len(), 2);
+        assert_eq!(args.css[0].value(), "styles.css");
+        assert_eq!(args.css[1].value(), "theme.css");
+    }
+
+    #[test]
+    fn parse_content_script_args_all_options() {
+        let tokens: proc_macro2::TokenStream = quote::quote! {
+            matches = ["<all_urls>"],
+            run_at = DocumentStart,
+            all_frames = true,
+            css = ["styles.css"]
+        };
+        let args: ContentScriptArgs = syn::parse2(tokens).unwrap();
+        assert_eq!(args.matches.len(), 1);
+        assert_eq!(args.run_at.unwrap().to_string(), "DocumentStart");
+        assert_eq!(args.all_frames, Some(true));
+        assert_eq!(args.css.len(), 1);
     }
 }

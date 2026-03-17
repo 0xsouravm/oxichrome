@@ -51,6 +51,12 @@ struct OptionsUi {
 struct ContentScriptEntry {
     matches: Vec<String>,
     js: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    run_at: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    all_frames: Option<bool>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    css: Vec<String>,
 }
 
 #[derive(Serialize)]
@@ -101,6 +107,9 @@ pub fn generate_manifest(metadata: &ExtensionMetadata, browser: Browser) -> anyh
             ContentScriptEntry {
                 matches: cs.matches.clone(),
                 js: vec![format!("content_script_{}.js", cs.fn_name)],
+                run_at: cs.run_at.clone(),
+                all_frames: cs.all_frames,
+                css: cs.css.clone(),
             }
         }).collect(),
         web_accessible_resources: vec![WebAccessibleResource {
@@ -188,6 +197,9 @@ mod tests {
                 ContentScript {
                     fn_name: "inject".to_string(),
                     matches: vec!["<all_urls>".to_string()],
+                    run_at: None,
+                    all_frames: None,
+                    css: vec![],
                 },
             ],
         };
@@ -196,6 +208,40 @@ mod tests {
 
         assert_eq!(parsed["content_scripts"][0]["matches"][0], "<all_urls>");
         assert_eq!(parsed["content_scripts"][0]["js"][0], "content_script_inject.js");
+        assert!(parsed["content_scripts"][0].get("run_at").is_none());
+        assert!(parsed["content_scripts"][0].get("all_frames").is_none());
+        assert!(parsed["content_scripts"][0].get("css").is_none());
+    }
+
+    #[test]
+    fn test_generate_manifest_content_scripts_with_options() {
+        use crate::source_parser::ContentScript;
+
+        let metadata = ExtensionMetadata {
+            name: Some("Test".to_string()),
+            version: Some("1.0.0".to_string()),
+            description: None,
+            permissions: vec![],
+            background_functions: vec![],
+            event_handlers: vec![],
+            has_popup: false,
+            has_options_page: false,
+            content_scripts: vec![
+                ContentScript {
+                    fn_name: "inject".to_string(),
+                    matches: vec!["<all_urls>".to_string()],
+                    run_at: Some("document_start".to_string()),
+                    all_frames: Some(true),
+                    css: vec!["styles.css".to_string()],
+                },
+            ],
+        };
+        let json = generate_manifest(&metadata, Browser::Chromium).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(parsed["content_scripts"][0]["run_at"], "document_start");
+        assert_eq!(parsed["content_scripts"][0]["all_frames"], true);
+        assert_eq!(parsed["content_scripts"][0]["css"][0], "styles.css");
     }
 
     #[test]
