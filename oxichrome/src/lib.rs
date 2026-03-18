@@ -1,7 +1,8 @@
-pub use oxichrome_macros::{extension, background, on, popup, options_page};
+pub use oxichrome_macros::{extension, background, on, popup, options_page, content_script};
 
 pub use oxichrome_core as core;
 
+pub use oxichrome_core::content_script::RunAt;
 pub use oxichrome_core::error::{OxichromeError, Result};
 pub use oxichrome_core::runtime;
 pub use oxichrome_core::storage;
@@ -22,7 +23,7 @@ pub mod __private {
 }
 
 pub mod prelude {
-    pub use crate::{extension, background, on, popup, options_page};
+    pub use crate::{extension, background, on, popup, options_page, content_script};
     pub use crate::{OxichromeError, Result};
     pub use crate::core::error;
     pub use crate::runtime;
