@@ -8,7 +8,6 @@ pub fn expand(attr: TokenStream, item: TokenStream) -> Result<TokenStream, syn::
     let args: ContentScriptArgs = syn::parse2(attr)?;
     let _matches = args.matches;
     let _all_frames = args.all_frames;
-    let _css = args.css;
     let func: ItemFn = syn::parse2(item)?;
 
     if func.sig.asyncness.is_none() {
@@ -35,8 +34,17 @@ pub fn expand(attr: TokenStream, item: TokenStream) -> Result<TokenStream, syn::
         }
     });
 
+    let css_checks: Vec<_> = args.css.iter().map(|css_file| {
+        let path = format!("static/{}", css_file.value());
+        quote! {
+            #[doc(hidden)]
+            const _: &[u8] = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/", #path));
+        }
+    }).collect();
+
     Ok(quote! {
         #run_at_check
+        #(#css_checks)*
 
         #(#attrs)*
         #vis async fn #fn_name() #fn_body
