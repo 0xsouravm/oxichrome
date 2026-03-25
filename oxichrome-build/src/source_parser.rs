@@ -14,6 +14,7 @@ pub struct ExtensionMetadata {
     pub event_handlers: Vec<EventHandler>,
     pub has_popup: bool,
     pub has_options_page: bool,
+    pub content_scripts: Vec<ContentScript>,
 }
 
 #[derive(Debug)]
@@ -21,6 +22,15 @@ pub struct EventHandler {
     pub fn_name: String,
     pub namespace: String,
     pub event_name: String,
+}
+
+#[derive(Debug)]
+pub struct ContentScript {
+    pub fn_name: String,
+    pub matches: Vec<String>,
+    pub run_at: Option<String>,
+    pub all_frames: Option<bool>,
+    pub css: Vec<String>,
 }
 
 struct MetadataVisitor {
@@ -81,6 +91,66 @@ impl MetadataVisitor {
                 }
             }
         }
+    }
+
+    fn parse_content_script_args(&self, attr: &Attribute) -> Option<ContentScript> {
+        let nested = attr.parse_args_with(
+            syn::punctuated::Punctuated::<Meta, syn::Token![,]>::parse_terminated,
+        ).ok()?;
+
+        let mut matches = Vec::new();
+        let mut run_at = None;
+        let mut all_frames = None;
+        let mut css = Vec::new();
+
+        for meta in &nested {
+            if let Meta::NameValue(MetaNameValue { path, value, .. }) = meta {
+                if path.is_ident("matches") {
+                    if let Expr::Array(arr) = value {
+                        for elem in &arr.elems {
+                            if let Expr::Lit(ExprLit { lit: Lit::Str(s), .. }) = elem {
+                                matches.push(s.value());
+                            }
+                        }
+                    }
+                } else if path.is_ident("run_at") {
+                    if let Expr::Path(expr_path) = value {
+                        if let Some(ident) = expr_path.path.get_ident() {
+                            run_at = match ident.to_string().as_str() {
+                                "DocumentStart" => Some("document_start".to_string()),
+                                "DocumentEnd" => Some("document_end".to_string()),
+                                "DocumentIdle" => Some("document_idle".to_string()),
+                                _ => None,
+                            };
+                        }
+                    }
+                } else if path.is_ident("all_frames") {
+                    if let Expr::Lit(ExprLit { lit: Lit::Bool(b), .. }) = value {
+                        all_frames = Some(b.value());
+                    }
+                } else if path.is_ident("css") {
+                    if let Expr::Array(arr) = value {
+                        for elem in &arr.elems {
+                            if let Expr::Lit(ExprLit { lit: Lit::Str(s), .. }) = elem {
+                                css.push(s.value());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if matches.is_empty() {
+            return None;
+        }
+
+        Some(ContentScript {
+            fn_name: String::new(), // filled in by caller
+            matches,
+            run_at,
+            all_frames,
+            css,
+        })
     }
 
     fn parse_event_args(&self, attr: &Attribute) -> Option<(String, String)> {
@@ -144,6 +214,12 @@ impl<'ast> Visit<'ast> for MetadataVisitor {
             if Self::is_oxichrome_attr(attr, "options_page") {
                 self.metadata.has_options_page = true;
             }
+            if Self::is_oxichrome_attr(attr, "content_script") {
+                if let Some(mut cs) = self.parse_content_script_args(attr) {
+                    cs.fn_name = node.sig.ident.to_string();
+                    self.metadata.content_scripts.push(cs);
+                }
+            }
         }
         syn::visit::visit_item_fn(self, node);
     }
@@ -200,5 +276,58 @@ mod tests {
         assert_eq!(metadata.event_handlers[0].event_name, "on_installed");
         assert!(metadata.has_popup);
         assert!(metadata.has_options_page);
+        assert!(metadata.content_scripts.is_empty());
+    }
+
+    #[test]
+    fn test_parse_content_script() {
+        let source = r#"
+            #[oxichrome::extension(
+                name = "Test",
+                version = "1.0.0"
+            )]
+            struct MyExt;
+
+            #[oxichrome::content_script(matches = ["<all_urls>"])]
+            async fn inject() {}
+
+            #[oxichrome::content_script(matches = ["https://example.com/*", "https://test.com/*"])]
+            async fn inject_specific() {}
+        "#;
+
+        let metadata = parse_source_str(source).unwrap();
+        assert_eq!(metadata.content_scripts.len(), 2);
+        assert_eq!(metadata.content_scripts[0].fn_name, "inject");
+        assert_eq!(metadata.content_scripts[0].matches, vec!["<all_urls>"]);
+        assert_eq!(metadata.content_scripts[1].fn_name, "inject_specific");
+        assert_eq!(metadata.content_scripts[1].matches, vec!["https://example.com/*", "https://test.com/*"]);
+    }
+
+    #[test]
+    fn test_parse_content_script_with_options() {
+        let source = r#"
+            #[oxichrome::extension(
+                name = "Test",
+                version = "1.0.0"
+            )]
+            struct MyExt;
+
+            #[oxichrome::content_script(
+                matches = ["<all_urls>"],
+                run_at = DocumentStart,
+                all_frames = true,
+                css = ["styles.css", "theme.css"]
+            )]
+            async fn inject() {}
+        "#;
+
+        let metadata = parse_source_str(source).unwrap();
+        assert_eq!(metadata.content_scripts.len(), 1);
+        let cs = &metadata.content_scripts[0];
+        assert_eq!(cs.fn_name, "inject");
+        assert_eq!(cs.matches, vec!["<all_urls>"]);
+        assert_eq!(cs.run_at.as_deref(), Some("document_start"));
+        assert_eq!(cs.all_frames, Some(true));
+        assert_eq!(cs.css, vec!["styles.css", "theme.css"]);
     }
 }

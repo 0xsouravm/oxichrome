@@ -1,3 +1,4 @@
+pub mod content_script;
 pub mod error;
 pub mod js_bridge;
 pub mod runtime;
