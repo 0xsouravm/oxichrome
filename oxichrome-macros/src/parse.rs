@@ -137,6 +137,11 @@ impl Parse for ExtensionArgs {
                 "description" => {
                     description = Some(input.parse()?);
                 }
+                "gecko_id" => {
+                    // consumed but not used — gecko_id is build-tool metadata
+                    // (manifest.json generation), not needed for code generation
+                    let _: LitStr = input.parse()?;
+                }
                 "permissions" => {
                     let content;
                     syn::bracketed!(content in input);
@@ -436,6 +441,19 @@ mod tests {
                 err
             );
         }
+    }
+
+    #[test]
+    fn parse_extension_args_with_gecko_id() {
+        let tokens: proc_macro2::TokenStream = quote::quote! {
+            name = "Test",
+            version = "1.0.0",
+            gecko_id = "test@example.com"
+        };
+        let args: ExtensionArgs = syn::parse2(tokens).unwrap();
+        // More so ensuring we didn't break anything, as the value isn't stored in the ExtensionArgs
+        assert_eq!(args.name.value(), "Test");
+        assert_eq!(args.version.value(), "1.0.0");
     }
 
     #[test]
