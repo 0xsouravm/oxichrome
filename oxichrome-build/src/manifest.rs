@@ -15,6 +15,9 @@ struct Manifest {
     default_locale: Option<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     permissions: Vec<String>,
+    /// RSA-2048 public key (base64 DER) for Chromium extension ID
+    #[serde(skip_serializing_if = "Option::is_none")]
+    key: Option<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     optional_permissions: Vec<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -182,6 +185,7 @@ pub fn generate_manifest(metadata: &ExtensionMetadata, browser: Browser) -> anyh
         version: version.to_string(),
         description: metadata.description.clone(),
         default_locale: metadata.default_locale.clone(),
+        key: if browser == Browser::Chromium { metadata.key.clone() } else { None },
         permissions: {
             let mut permissions = for_browser(&metadata.permissions, metadata, browser);
             if !metadata.menus.is_empty() && !permissions.iter().any(|p| p == "contextMenus") {
@@ -433,6 +437,7 @@ mod tests {
             version: Some("1.0.0".to_string()),
             description: Some("A test extension".to_string()),
             permissions: vec!["storage".to_string(), "tabs".to_string()],
+            key: None,
             host_permissions: vec![],
             optional_permissions: vec![],
             optional_host_permissions: vec![],
@@ -487,6 +492,7 @@ mod tests {
             version: Some("1.0.0".to_string()),
             description: None,
             permissions: vec![],
+            key: None,
             host_permissions: vec![],
             optional_permissions: vec![],
             optional_host_permissions: vec![],
@@ -543,6 +549,7 @@ mod tests {
             version: Some("1.0.0".to_string()),
             description: None,
             permissions: vec![],
+            key: None,
             host_permissions: vec![],
             optional_permissions: vec![],
             optional_host_permissions: vec![],
@@ -623,6 +630,7 @@ mod tests {
             web_accessible: vec![],
             offscreen: vec![],
             permissions: vec!["storage".to_string()],
+            key: None,
             host_permissions: vec![
                 "*://developer.mozilla.org/*".to_string(),
                 "*://*.example.org/*".to_string(),
@@ -669,6 +677,19 @@ mod tests {
         let parsed: serde_json::Value = serde_json::from_str(&generate_manifest(&plain, Browser::Chromium).unwrap()).unwrap();
         assert!(parsed.get("declarative_net_request").is_none());
         assert_eq!(parsed["web_accessible_resources"].as_array().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn extension_key_reaches_chromium_only() {
+        let text = r#"{"kind":"extension","name":"K","version":"1.0.0","description":null,"gecko_id":null,"key":"MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA","permissions":["nativeMessaging"],"host_permissions":[],"icons":[],"action":null}"#;
+        let metadata = crate::metadata::parse_entries(text).unwrap();
+        assert_eq!(metadata.key.as_deref(), Some("MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA"));
+        let chromium: serde_json::Value =
+            serde_json::from_str(&generate_manifest(&metadata, Browser::Chromium).unwrap()).unwrap();
+        assert_eq!(chromium["key"], "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA");
+        let firefox: serde_json::Value =
+            serde_json::from_str(&generate_manifest(&metadata, Browser::Firefox).unwrap()).unwrap();
+        assert!(firefox.get("key").is_none());
     }
 
     #[test]

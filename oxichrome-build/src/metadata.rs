@@ -13,6 +13,8 @@ pub struct ExtensionMetadata {
     pub version: Option<String>,
     pub description: Option<String>,
     pub permissions: Vec<String>,
+    /// RSA-2048 public key (base64 DER) for Chromium extension ID
+    pub key: Option<String>,
     pub optional_permissions: Vec<String>,
     pub host_permissions: Vec<String>,
     pub optional_host_permissions: Vec<String>,
@@ -186,6 +188,8 @@ enum Entry {
         description: Option<String>,
         gecko_id: Option<String>,
         permissions: Vec<String>,
+        #[serde(default)]
+        key: Option<String>,
         #[serde(default)]
         optional_permissions: Vec<String>,
         host_permissions: Vec<String>,
@@ -365,6 +369,7 @@ pub fn parse_entries(text: &str) -> anyhow::Result<ExtensionMetadata> {
                 description,
                 gecko_id,
                 permissions,
+                key,
                 optional_permissions,
                 host_permissions,
                 optional_host_permissions,
@@ -391,6 +396,7 @@ pub fn parse_entries(text: &str) -> anyhow::Result<ExtensionMetadata> {
                 metadata.description = description;
                 metadata.gecko_id = gecko_id;
                 metadata.permissions = permissions;
+                metadata.key = key;
                 metadata.host_permissions = host_permissions;
                 metadata.icons = icons;
                 metadata.action = action;
