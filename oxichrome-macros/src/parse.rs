@@ -7,6 +7,10 @@ pub struct ExtensionArgs {
     pub version: LitStr,
     pub description: Option<LitStr>,
     pub permissions: Vec<LitStr>,
+    /// RSA-2048 public key (base64 DER) for Chromium extension ID
+    /// Accepted by the proc-macro so `key = "..."` compiles
+    #[allow(dead_code)]
+    pub extension_key: Option<LitStr>,
 }
 
 impl Parse for ExtensionArgs {
@@ -15,12 +19,13 @@ impl Parse for ExtensionArgs {
         let mut version: Option<LitStr> = None;
         let mut description: Option<LitStr> = None;
         let mut permissions: Vec<LitStr> = Vec::new();
+        let mut extension_key: Option<LitStr> = None;
 
         while !input.is_empty() {
-            let key: Ident = input.parse()?;
+            let attr_key: Ident = input.parse()?;
             input.parse::<Token![=]>()?;
 
-            match key.to_string().as_str() {
+            match attr_key.to_string().as_str() {
                 "name" => {
                     name = Some(input.parse()?);
                 }
@@ -29,6 +34,9 @@ impl Parse for ExtensionArgs {
                 }
                 "description" => {
                     description = Some(input.parse()?);
+                }
+                "key" => {
+                    extension_key = Some(input.parse()?);
                 }
                 "permissions" => {
                     let content;
@@ -42,7 +50,7 @@ impl Parse for ExtensionArgs {
                 }
                 other => {
                     return Err(syn::Error::new(
-                        key.span(),
+                        attr_key.span(),
                         format!("unknown argument `{other}`"),
                     ));
                 }
@@ -71,6 +79,7 @@ impl Parse for ExtensionArgs {
             version,
             description,
             permissions,
+            extension_key,
         })
     }
 }

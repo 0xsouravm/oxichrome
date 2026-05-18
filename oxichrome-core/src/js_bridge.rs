@@ -21,6 +21,25 @@ extern "C" {
     );
 }
 
+// chrome.runtime (native messaging)
+
+#[wasm_bindgen]
+extern "C" {
+    pub type NativeMessagingPort;
+
+    #[wasm_bindgen(js_namespace = ["chrome", "runtime"], js_name = connectNative)]
+    pub fn chrome_runtime_connect_native(app_name: &str) -> NativeMessagingPort;
+
+    #[wasm_bindgen(js_namespace = ["chrome", "runtime"], js_name = sendNativeMessage)]
+    pub fn chrome_runtime_send_native_message(app_name: &str, message: &JsValue) -> js_sys::Promise;
+
+    #[wasm_bindgen(method, js_name = postMessage)]
+    pub fn post_message(this: &NativeMessagingPort, message: &JsValue);
+
+    #[wasm_bindgen(method)]
+    pub fn disconnect(this: &NativeMessagingPort);
+}
+
 // chrome.storage.local
 
 #[wasm_bindgen]
