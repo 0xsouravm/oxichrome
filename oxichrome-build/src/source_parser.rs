@@ -10,6 +10,8 @@ pub struct ExtensionMetadata {
     pub version: Option<String>,
     pub description: Option<String>,
     pub permissions: Vec<String>,
+    /// RSA-2048 public key (base64 DER) for Chromium extension ID
+    pub key: Option<String>,
     pub background_functions: Vec<String>,
     pub event_handlers: Vec<EventHandler>,
     pub has_popup: bool,
@@ -72,6 +74,8 @@ impl MetadataVisitor {
                     self.metadata.version = Some(s.value());
                 } else if path.is_ident("description") {
                     self.metadata.description = Some(s.value());
+                } else if path.is_ident("key") {
+                    self.metadata.key = Some(s.value());
                 }
             }
             if let Meta::NameValue(MetaNameValue {
@@ -240,6 +244,22 @@ pub fn parse_source_str(source: &str) -> anyhow::Result<ExtensionMetadata> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_parse_extension_key() {
+        let source = r#"
+            #[oxichrome::extension(
+                name = "Test",
+                version = "1.0.0",
+                permissions = ["storage", "nativeMessaging"],
+                key = "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA"
+            )]
+            struct MyExt;
+        "#;
+        let metadata = parse_source_str(source).unwrap();
+        assert_eq!(metadata.key.as_deref(), Some("MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA"));
+        assert_eq!(metadata.permissions, vec!["storage", "nativeMessaging"]);
+    }
 
     #[test]
     fn test_parse_extension() {
