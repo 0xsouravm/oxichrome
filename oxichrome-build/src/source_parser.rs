@@ -16,6 +16,7 @@ pub struct ExtensionMetadata {
     pub has_popup: bool,
     pub has_options_page: bool,
     pub content_scripts: Vec<ContentScript>,
+    pub gecko_id: Option<String>,
 }
 
 #[derive(Debug)]
@@ -73,6 +74,8 @@ impl MetadataVisitor {
                     self.metadata.version = Some(s.value());
                 } else if path.is_ident("description") {
                     self.metadata.description = Some(s.value());
+                } else if path.is_ident("gecko_id") {
+                    self.metadata.gecko_id = Some(s.value());
                 }
             }
             if let Meta::NameValue(MetaNameValue {
@@ -347,7 +350,8 @@ mod tests {
                 name = "Test",
                 version = "1.0.0",
                 permissions = ["storage"],
-                host_permissions = ["*://developer.mozilla.org/*", "*://*.example.org/*"]
+                host_permissions = ["*://developer.mozilla.org/*", "*://*.example.org/*"],
+                gecko_id = "my-ext@example.com"
             )]
             struct MyExt;
         "#;
@@ -356,5 +360,20 @@ mod tests {
         assert_eq!(metadata.host_permissions.len(), 2);
         assert_eq!(metadata.host_permissions[0], "*://developer.mozilla.org/*");
         assert_eq!(metadata.host_permissions[1], "*://*.example.org/*");
+        assert_eq!(metadata.gecko_id.as_deref(), Some("my-ext@example.com"));
+    }
+
+    #[test]
+    fn test_parse_extension_gecko_id_defaults_to_none() {
+        let source = r#"
+            #[oxichrome::extension(
+                name = "Test",
+                version = "1.0.0"
+            )]
+            struct MyExt;
+        "#;
+
+        let metadata = parse_source_str(source).unwrap();
+        assert!(metadata.gecko_id.is_none());
     }
 }

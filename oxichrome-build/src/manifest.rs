@@ -134,7 +134,9 @@ pub fn generate_manifest(metadata: &ExtensionMetadata, browser: Browser) -> anyh
             }),
         );
 
-        let gecko_id = format!("{}@oxichrome.dev", name.to_lowercase().replace(' ', "-"));
+        let gecko_id = metadata.gecko_id.clone().unwrap_or_else(|| {
+            format!("{}@oxichrome.dev", name.to_lowercase().replace(' ', "-"))
+        });
         obj.insert(
             "browser_specific_settings".to_string(),
             serde_json::json!({
@@ -165,6 +167,7 @@ mod tests {
             has_popup: true,
             has_options_page: true,
             content_scripts: vec![],
+            gecko_id: None,
         }
     }
 
@@ -207,6 +210,7 @@ mod tests {
                     css: vec![],
                 },
             ],
+            gecko_id: None,
         };
         let json = generate_manifest(&metadata, Browser::Chromium).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
@@ -241,6 +245,7 @@ mod tests {
                     css: vec!["styles.css".to_string()],
                 },
             ],
+            gecko_id: None,
         };
         let json = generate_manifest(&metadata, Browser::Chromium).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
@@ -276,6 +281,7 @@ mod tests {
             name: Some("Test".to_string()),
             version: Some("1.0.0".to_string()),
             description: None,
+            gecko_id: None,
             permissions: vec!["storage".to_string()],
             host_permissions: vec![
                 "*://developer.mozilla.org/*".to_string(),
@@ -302,5 +308,18 @@ mod tests {
         let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
 
         assert!(parsed.get("host_permissions").is_none());
+    }
+
+    #[test]
+    fn test_generate_manifest_firefox_custom_gecko_id() {
+        let mut metadata = test_metadata();
+        metadata.gecko_id = Some("my-ext@example.com".to_string());
+        let json = generate_manifest(&metadata, Browser::Firefox).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(
+            parsed["browser_specific_settings"]["gecko"]["id"],
+            "my-ext@example.com"
+        );
     }
 }
