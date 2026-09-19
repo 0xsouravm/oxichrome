@@ -106,6 +106,53 @@ fn validate_host_permission_pattern(pattern: &LitStr) -> syn::Result<()> {
     Ok(())
 }
 
+/// Tries the recommended email-like form first and falls back to a GUID.
+///
+/// See <https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/manifest.json/browser_specific_settings#id>
+fn validate_gecko_id(id: &LitStr) -> syn::Result<()> {
+    let val = id.value();
+
+    if is_gecko_id_email(&val) || is_gecko_id_guid(&val) {
+        return Ok(());
+    }
+
+    Err(syn::Error::new(
+        id.span(),
+        format!(
+            "invalid gecko_id `{val}`. See https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/manifest.json/browser_specific_settings#id"
+        ),
+    ))
+}
+
+fn is_gecko_id_email(val: &str) -> bool {
+    let Some((local, domain)) = val.split_once('@') else {
+        return false;
+    };
+
+    let is_allowed = |c: char| c.is_ascii_alphanumeric() || matches!(c, '-' | '.' | '_');
+
+    !domain.is_empty()
+        && local.chars().all(is_allowed)
+        && domain.chars().all(is_allowed)
+        && val.chars().count() <= 80
+}
+
+fn is_gecko_id_guid(val: &str) -> bool {
+    // The braces are part of the form
+    let inner = val
+        .strip_prefix('{')
+        .and_then(|rest| rest.strip_suffix('}'));
+
+    inner.is_some_and(|inner| {
+        let groups: Vec<&str> = inner.split('-').collect();
+        let widths = [8, 4, 4, 4, 12];
+        groups.len() == widths.len()
+            && groups.iter().zip(widths).all(|(group, width)| {
+                group.len() == width && group.chars().all(|c| c.is_ascii_hexdigit())
+            })
+    })
+}
+
 #[derive(Debug)]
 pub struct ExtensionArgs {
     pub name: LitStr,
@@ -138,9 +185,10 @@ impl Parse for ExtensionArgs {
                     description = Some(input.parse()?);
                 }
                 "gecko_id" => {
-                    // consumed but not used — gecko_id is build-tool metadata
+                    // validated but not stored — gecko_id is build-tool metadata
                     // (manifest.json generation), not needed for code generation
-                    let _: LitStr = input.parse()?;
+                    let gecko_id: LitStr = input.parse()?;
+                    validate_gecko_id(&gecko_id)?;
                 }
                 "permissions" => {
                     let content;
@@ -454,6 +502,117 @@ mod tests {
         // More so ensuring we didn't break anything, as the value isn't stored in the ExtensionArgs
         assert_eq!(args.name.value(), "Test");
         assert_eq!(args.version.value(), "1.0.0");
+    }
+
+    #[test]
+    fn parse_extension_args_gecko_id_guid() {
+        let tokens: proc_macro2::TokenStream = quote::quote! {
+            name = "Test",
+            version = "1.0.0",
+            gecko_id = "{daf44bf7-a45e-4450-979c-91cf07434c3d}"
+        };
+        let args: ExtensionArgs = syn::parse2(tokens).unwrap();
+        assert_eq!(args.name.value(), "Test");
+    }
+
+    #[test]
+    fn parse_extension_args_gecko_id_invalid() {
+        let tokens: proc_macro2::TokenStream = quote::quote! {
+            name = "Test",
+            version = "1.0.0",
+            gecko_id = "not-an-id"
+        };
+        let err = syn::parse2::<ExtensionArgs>(tokens).unwrap_err();
+        assert!(err.to_string().contains("invalid gecko_id `not-an-id`"));
+    }
+
+    fn gecko_id(val: &str) -> LitStr {
+        LitStr::new(val, proc_macro2::Span::call_site())
+    }
+
+    #[test]
+    fn validate_gecko_id_accepts_either_form() {
+        assert!(validate_gecko_id(&gecko_id("my-ext@example.com")).is_ok());
+        assert!(validate_gecko_id(&gecko_id("{daf44bf7-a45e-4450-979c-91cf07434c3d}")).is_ok());
+    }
+
+    #[test]
+    fn validate_gecko_id_error_points_at_the_docs() {
+        for val in ["not-an-id", "{not-a-guid}", "my ext@example.com"] {
+            let err = validate_gecko_id(&gecko_id(val)).unwrap_err().to_string();
+            assert!(
+                err.contains(val),
+                "Expected the offending value in the error for '{val}', got: {err}"
+            );
+            assert!(
+                err.contains("browser_specific_settings#id"),
+                "Expected a docs link in the error for '{val}', got: {err}"
+            );
+        }
+    }
+
+    #[test]
+    fn is_gecko_id_guid_accepts_hex_groups() {
+        // Hex is case-insensitive
+        for val in [
+            "{daf44bf7-a45e-4450-979c-91cf07434c3d}",
+            "{DAF44BF7-A45E-4450-979C-91CF07434C3D}",
+        ] {
+            assert!(is_gecko_id_guid(val), "Expected '{val}' to be accepted");
+        }
+    }
+
+    #[test]
+    fn is_gecko_id_guid_rejects_malformed() {
+        for val in [
+            "daf44bf7-a45e-4450-979c-91cf07434c3d",  // braces are required
+            "{daf44bf7-a45e-4450-979c-91cf07434c3d", // unterminated
+            "{daf44bf7-a45e-4450}",                  // too few groups
+            "{daf44bf7a45e4450979c91cf07434c3d}",    // no separators
+            "{daf44bf7-a45e-4450-979c-91cf07434c3}", // short final group
+            "{daf44bf7-a45e-4450-979c-91cf07434cgg}", // non-hex digits
+            "{}",
+        ] {
+            assert!(!is_gecko_id_guid(val), "Expected '{val}' to be rejected");
+        }
+    }
+
+    #[test]
+    fn is_gecko_id_email_accepts_allowed_chars() {
+        for val in [
+            "my-ext@example.com",
+            "great_app@developers.company",
+            "a.b-c_d@e.f-g_h",
+            // Regex on MDN allows an empty user
+            "@example.com",
+        ] {
+            assert!(is_gecko_id_email(val), "Expected '{val}' to be accepted");
+        }
+    }
+
+    #[test]
+    fn is_gecko_id_email_rejects_malformed() {
+        for val in [
+            "not-an-id",           // no `@`
+            "my-ext@",             // empty domain
+            "my ext@example.com",  // space
+            "my+ext@example.com",  // plus
+            "my@ext@example.com",  // second `@`
+            "my-ext@exam ple.com", // space in the domain
+        ] {
+            assert!(!is_gecko_id_email(val), "Expected '{val}' to be rejected");
+        }
+    }
+
+    #[test]
+    fn is_gecko_id_email_rejects_over_80_chars() {
+        // 80 characters exactly is still fine
+        let at_limit = format!("{}@example.com", "a".repeat(68));
+        assert_eq!(at_limit.chars().count(), 80);
+        assert!(is_gecko_id_email(&at_limit));
+
+        let too_long = format!("{}@example.com", "a".repeat(69));
+        assert!(!is_gecko_id_email(&too_long));
     }
 
     #[test]

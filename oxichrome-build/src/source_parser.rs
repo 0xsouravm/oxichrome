@@ -350,7 +350,7 @@ mod tests {
                 name = "Test",
                 version = "1.0.0",
                 permissions = ["storage"],
-                host_permissions = ["*://developer.mozilla.org/*", "*://*.example.org/*"]
+                host_permissions = ["*://developer.mozilla.org/*", "*://*.example.org/*"],
                 gecko_id = "my-ext@example.com"
             )]
             struct MyExt;
