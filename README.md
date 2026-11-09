@@ -188,6 +188,10 @@ let val: Option<i32> = oxichrome::storage::get("key").await?;
 oxichrome::storage::set("key", &42).await?;
 oxichrome::storage::remove("key").await?;
 
+// Storage areas (the functions above use `local`)
+oxichrome::storage::sync::set("key", &42).await?;
+oxichrome::storage::session::set("key", &42).await?;
+
 // Tabs
 let tabs: Vec<Tab> = oxichrome::tabs::query(&query).await?;
 let tab: Tab = oxichrome::tabs::create(&props).await?;

@@ -25,14 +25,32 @@ extern "C" {
 
 #[wasm_bindgen]
 extern "C" {
-    #[wasm_bindgen(js_namespace = ["chrome", "storage", "local"], js_name = get)]
-    pub fn chrome_storage_local_get(keys: &JsValue) -> js_sys::Promise;
+    #[wasm_bindgen(catch, js_namespace = ["chrome", "storage", "local"], js_name = get)]
+    pub fn chrome_storage_local_get(keys: &JsValue) -> Result<js_sys::Promise, JsValue>;
 
-    #[wasm_bindgen(js_namespace = ["chrome", "storage", "local"], js_name = set)]
-    pub fn chrome_storage_local_set(items: &JsValue) -> js_sys::Promise;
+    #[wasm_bindgen(catch, js_namespace = ["chrome", "storage", "local"], js_name = set)]
+    pub fn chrome_storage_local_set(items: &JsValue) -> Result<js_sys::Promise, JsValue>;
 
-    #[wasm_bindgen(js_namespace = ["chrome", "storage", "local"], js_name = remove)]
-    pub fn chrome_storage_local_remove(keys: &JsValue) -> js_sys::Promise;
+    #[wasm_bindgen(catch, js_namespace = ["chrome", "storage", "local"], js_name = remove)]
+    pub fn chrome_storage_local_remove(keys: &JsValue) -> Result<js_sys::Promise, JsValue>;
+
+    #[wasm_bindgen(catch, js_namespace = ["chrome", "storage", "sync"], js_name = get)]
+    pub fn chrome_storage_sync_get(keys: &JsValue) -> Result<js_sys::Promise, JsValue>;
+
+    #[wasm_bindgen(catch, js_namespace = ["chrome", "storage", "sync"], js_name = set)]
+    pub fn chrome_storage_sync_set(items: &JsValue) -> Result<js_sys::Promise, JsValue>;
+
+    #[wasm_bindgen(catch, js_namespace = ["chrome", "storage", "sync"], js_name = remove)]
+    pub fn chrome_storage_sync_remove(keys: &JsValue) -> Result<js_sys::Promise, JsValue>;
+
+    #[wasm_bindgen(catch, js_namespace = ["chrome", "storage", "session"], js_name = get)]
+    pub fn chrome_storage_session_get(keys: &JsValue) -> Result<js_sys::Promise, JsValue>;
+
+    #[wasm_bindgen(catch, js_namespace = ["chrome", "storage", "session"], js_name = set)]
+    pub fn chrome_storage_session_set(items: &JsValue) -> Result<js_sys::Promise, JsValue>;
+
+    #[wasm_bindgen(catch, js_namespace = ["chrome", "storage", "session"], js_name = remove)]
+    pub fn chrome_storage_session_remove(keys: &JsValue) -> Result<js_sys::Promise, JsValue>;
 
     #[wasm_bindgen(js_namespace = ["chrome", "storage", "onChanged"], js_name = addListener)]
     pub fn chrome_storage_on_changed_add_listener(
