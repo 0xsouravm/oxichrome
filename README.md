@@ -118,10 +118,23 @@ Defines extension metadata. Applied to a struct.
     name = "My Extension",
     version = "1.0.0",
     description = "Optional description",
-    permissions = ["storage", "tabs"]
+    permissions = ["storage", "tabs"],
+    host_permissions = ["https://example.org/*", "*://*.example.com/*"], // optional
+    gecko_id = "my-extension@example.com" // optional, Firefox only
 )]
 struct MyExtension;
 ```
+
+`host_permissions` lists the [match patterns](https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/Match_patterns) your extension can access, and is written to `host_permissions` in the manifest for both Chromium and Firefox. The key is left out of the manifest when the list is empty. Malformed patterns are compile errors.
+
+`gecko_id` sets the add-on ID in the Firefox manifest (`browser_specific_settings.gecko.id`). Chromium builds ignore it. If you leave it out, the ID is generated from the extension name, for example `my-extension@oxichrome.dev`.
+
+It accepts either form [allowed by Firefox](https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/manifest.json/browser_specific_settings#id):
+
+- Email-like, up to 80 characters: `my-extension@example.com`
+- GUID in braces: `{daf44bf7-a45e-4450-979c-91cf07434c3d}`
+
+An invalid ID is a compile error, for both Firefox and Chromium builds.
 
 ### `#[oxichrome::background]`
 
@@ -198,7 +211,7 @@ dist/
 │       ├── crate_name.js
 │       └── crate_name_bg.wasm
 └── firefox/                   # --target firefox
-    ├── manifest.json          # background scripts, gecko ID
+    ├── manifest.json          # background scripts, gecko ID (custom via gecko_id)
     └── ...                    # same files as chromium/
 ```
 
