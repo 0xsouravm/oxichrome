@@ -43,7 +43,7 @@ pub async fn set_badge_text(text: &str, tab_id: Option<i32>) -> Result<()> {
         tab_id,
         ..Default::default()
     };
-    await_unit(js_bridge::chrome_action_set_badge_text(&to_js(&details)?)).await
+    await_unit(js_bridge::chrome_action_set_badge_text(&to_js(&details)?)?).await
 }
 
 pub async fn get_badge_text(tab_id: Option<i32>) -> Result<String> {
@@ -51,7 +51,7 @@ pub async fn get_badge_text(tab_id: Option<i32>) -> Result<String> {
         tab_id,
         ..Default::default()
     };
-    await_string(js_bridge::chrome_action_get_badge_text(&to_js(&details)?)).await
+    await_string(js_bridge::chrome_action_get_badge_text(&to_js(&details)?)?).await
 }
 pub async fn set_badge_background_color(color: &str, tab_id: Option<i32>) -> Result<()> {
     let details = Details {
@@ -59,9 +59,9 @@ pub async fn set_badge_background_color(color: &str, tab_id: Option<i32>) -> Res
         tab_id,
         ..Default::default()
     };
-    await_unit(js_bridge::chrome_action_set_badge_background_color(&to_js(
-        &details,
-    )?))
+    await_unit(js_bridge::chrome_action_set_badge_background_color(
+        &to_js(&details)?,
+    )?)
     .await
 }
 pub async fn set_badge_text_color(color: &str, tab_id: Option<i32>) -> Result<()> {
@@ -72,7 +72,7 @@ pub async fn set_badge_text_color(color: &str, tab_id: Option<i32>) -> Result<()
     };
     await_unit(js_bridge::chrome_action_set_badge_text_color(&to_js(
         &details,
-    )?))
+    )?)?)
     .await
 }
 pub async fn set_title(title: &str, tab_id: Option<i32>) -> Result<()> {
@@ -81,7 +81,7 @@ pub async fn set_title(title: &str, tab_id: Option<i32>) -> Result<()> {
         tab_id,
         ..Default::default()
     };
-    await_unit(js_bridge::chrome_action_set_title(&to_js(&details)?)).await
+    await_unit(js_bridge::chrome_action_set_title(&to_js(&details)?)?).await
 }
 
 pub async fn get_title(tab_id: Option<i32>) -> Result<String> {
@@ -89,7 +89,7 @@ pub async fn get_title(tab_id: Option<i32>) -> Result<String> {
         tab_id,
         ..Default::default()
     };
-    await_string(js_bridge::chrome_action_get_title(&to_js(&details)?)).await
+    await_string(js_bridge::chrome_action_get_title(&to_js(&details)?)?).await
 }
 pub async fn set_icon(path: &str, tab_id: Option<i32>) -> Result<()> {
     let details = Details {
@@ -97,7 +97,7 @@ pub async fn set_icon(path: &str, tab_id: Option<i32>) -> Result<()> {
         tab_id,
         ..Default::default()
     };
-    await_unit(js_bridge::chrome_action_set_icon(&to_js(&details)?)).await
+    await_unit(js_bridge::chrome_action_set_icon(&to_js(&details)?)?).await
 }
 pub async fn set_popup(popup: &str, tab_id: Option<i32>) -> Result<()> {
     let details = Details {
@@ -105,7 +105,7 @@ pub async fn set_popup(popup: &str, tab_id: Option<i32>) -> Result<()> {
         tab_id,
         ..Default::default()
     };
-    await_unit(js_bridge::chrome_action_set_popup(&to_js(&details)?)).await
+    await_unit(js_bridge::chrome_action_set_popup(&to_js(&details)?)?).await
 }
 
 pub async fn get_popup(tab_id: Option<i32>) -> Result<String> {
@@ -113,15 +113,15 @@ pub async fn get_popup(tab_id: Option<i32>) -> Result<String> {
         tab_id,
         ..Default::default()
     };
-    await_string(js_bridge::chrome_action_get_popup(&to_js(&details)?)).await
+    await_string(js_bridge::chrome_action_get_popup(&to_js(&details)?)?).await
 }
 
 pub async fn enable(tab_id: Option<i32>) -> Result<()> {
-    await_unit(js_bridge::chrome_action_enable(tab_id)).await
+    await_unit(js_bridge::chrome_action_enable(tab_id)?).await
 }
 
 pub async fn disable(tab_id: Option<i32>) -> Result<()> {
-    await_unit(js_bridge::chrome_action_disable(tab_id)).await
+    await_unit(js_bridge::chrome_action_disable(tab_id)?).await
 }
 
 #[cfg(test)]
