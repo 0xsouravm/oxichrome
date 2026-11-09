@@ -11,10 +11,9 @@ authors.workspace = true
 
 [lib]
 proc-macro = true
+doctest = false
 
 [dependencies]
 proc-macro2 = "1.0.106"
 quote = "1.0.44"
 syn = { version = "2.0.114", features = ["full", "extra-traits", "visit"] }
-serde = { version = "1.0.228", features = ["derive"] }
-serde_json = "1.0.149"

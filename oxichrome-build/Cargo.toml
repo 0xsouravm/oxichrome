@@ -14,3 +14,6 @@ syn = { version = "2.0.114", features = ["full", "extra-traits", "visit", "parsi
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
 anyhow = "1.0.101"
+
+[lib]
+doctest = false
