@@ -10,7 +10,7 @@ pub fn get_url(path: &str) -> String {
 }
 
 pub async fn send_message<T: Serialize>(message: &T) -> Result<JsValue> {
-    let js_msg = serde_wasm_bindgen::to_value(message)?;
+    let js_msg = message.serialize(&serde_wasm_bindgen::Serializer::json_compatible())?;
     let promise = js_bridge::chrome_runtime_send_message(&js_msg);
     let result = JsFuture::from(promise).await?;
     Ok(result)

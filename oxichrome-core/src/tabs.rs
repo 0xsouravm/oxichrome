@@ -44,7 +44,7 @@ pub async fn remove(tab_id: i32) -> Result<()> {
 }
 
 pub async fn send_message<M: Serialize>(tab_id: i32, message: &M) -> Result<JsValue> {
-    let js_msg = serde_wasm_bindgen::to_value(message)?;
+    let js_msg = message.serialize(&serde_wasm_bindgen::Serializer::json_compatible())?;
     let promise = js_bridge::chrome_tabs_send_message(tab_id, &js_msg)?;
     let result = JsFuture::from(promise).await?;
     Ok(result)
