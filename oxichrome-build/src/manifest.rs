@@ -28,7 +28,8 @@ struct Manifest {
 
 #[derive(Serialize)]
 struct Action {
-    default_popup: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    default_popup: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -84,9 +85,14 @@ pub fn generate_manifest(metadata: &ExtensionMetadata, browser: Browser) -> anyh
         description: metadata.description.clone(),
         permissions: metadata.permissions.clone(),
         host_permissions: metadata.host_permissions.clone(),
-        action: if metadata.has_popup {
+        action: if metadata.has_popup
+            || metadata
+                .event_handlers
+                .iter()
+                .any(|handler| handler.namespace == "action")
+        {
             Some(Action {
-                default_popup: "popup.html".to_string(),
+                default_popup: metadata.has_popup.then(|| "popup.html".to_string()),
             })
         } else {
             None
@@ -154,6 +160,7 @@ pub fn generate_manifest(metadata: &ExtensionMetadata, browser: Browser) -> anyh
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::source_parser::EventHandler;
 
     fn test_metadata() -> ExtensionMetadata {
         ExtensionMetadata {
@@ -321,5 +328,31 @@ mod tests {
             parsed["browser_specific_settings"]["gecko"]["id"],
             "my-ext@example.com"
         );
+    }
+
+    #[test]
+    fn test_action_declared_for_on_clicked_without_popup() {
+        let mut metadata = test_metadata();
+        metadata.has_popup = false;
+        metadata.event_handlers = vec![EventHandler {
+            fn_name: "clicked".to_string(),
+            namespace: "action".to_string(),
+            event_name: "on_clicked".to_string(),
+        }];
+        let json = generate_manifest(&metadata, Browser::Chromium).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(parsed["action"], serde_json::json!({}));
+    }
+
+    #[test]
+    fn test_action_omitted_without_popup_or_handler() {
+        let mut metadata = test_metadata();
+        metadata.has_popup = false;
+        metadata.event_handlers = vec![];
+        let json = generate_manifest(&metadata, Browser::Chromium).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+
+        assert!(parsed.get("action").is_none());
     }
 }

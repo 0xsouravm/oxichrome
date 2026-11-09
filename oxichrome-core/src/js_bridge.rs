@@ -64,6 +64,45 @@ extern "C" {
     );
 }
 
+#[wasm_bindgen]
+extern "C" {
+    #[wasm_bindgen(js_namespace = ["chrome", "action"], js_name = setBadgeText)]
+    pub fn chrome_action_set_badge_text(details: &JsValue) -> js_sys::Promise;
+
+    #[wasm_bindgen(js_namespace = ["chrome", "action"], js_name = getBadgeText)]
+    pub fn chrome_action_get_badge_text(details: &JsValue) -> js_sys::Promise;
+
+    #[wasm_bindgen(js_namespace = ["chrome", "action"], js_name = setBadgeBackgroundColor)]
+    pub fn chrome_action_set_badge_background_color(details: &JsValue) -> js_sys::Promise;
+
+    #[wasm_bindgen(js_namespace = ["chrome", "action"], js_name = setBadgeTextColor)]
+    pub fn chrome_action_set_badge_text_color(details: &JsValue) -> js_sys::Promise;
+
+    #[wasm_bindgen(js_namespace = ["chrome", "action"], js_name = setTitle)]
+    pub fn chrome_action_set_title(details: &JsValue) -> js_sys::Promise;
+
+    #[wasm_bindgen(js_namespace = ["chrome", "action"], js_name = getTitle)]
+    pub fn chrome_action_get_title(details: &JsValue) -> js_sys::Promise;
+
+    #[wasm_bindgen(js_namespace = ["chrome", "action"], js_name = setIcon)]
+    pub fn chrome_action_set_icon(details: &JsValue) -> js_sys::Promise;
+
+    #[wasm_bindgen(js_namespace = ["chrome", "action"], js_name = setPopup)]
+    pub fn chrome_action_set_popup(details: &JsValue) -> js_sys::Promise;
+
+    #[wasm_bindgen(js_namespace = ["chrome", "action"], js_name = getPopup)]
+    pub fn chrome_action_get_popup(details: &JsValue) -> js_sys::Promise;
+
+    #[wasm_bindgen(js_namespace = ["chrome", "action"], js_name = enable)]
+    pub fn chrome_action_enable(tab_id: Option<i32>) -> js_sys::Promise;
+
+    #[wasm_bindgen(js_namespace = ["chrome", "action"], js_name = disable)]
+    pub fn chrome_action_disable(tab_id: Option<i32>) -> js_sys::Promise;
+
+    #[wasm_bindgen(js_namespace = ["chrome", "action", "onClicked"], js_name = addListener)]
+    pub fn chrome_action_on_clicked_add_listener(callback: &Closure<dyn FnMut(JsValue)>);
+}
+
 #[macro_export]
 macro_rules! log {
     ($($arg:tt)*) => {

@@ -4,6 +4,7 @@ pub use oxichrome_core as core;
 
 pub use oxichrome_core::content_script::RunAt;
 pub use oxichrome_core::error::{OxichromeError, Result};
+pub use oxichrome_core::action;
 pub use oxichrome_core::runtime;
 pub use oxichrome_core::storage;
 pub use oxichrome_core::tabs;
@@ -26,6 +27,7 @@ pub mod prelude {
     pub use crate::{extension, background, on, popup, options_page, content_script};
     pub use crate::{OxichromeError, Result};
     pub use crate::core::error;
+    pub use crate::action;
     pub use crate::runtime;
     pub use crate::storage;
     pub use crate::tabs;

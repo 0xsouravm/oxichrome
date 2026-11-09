@@ -196,7 +196,17 @@ oxichrome::tabs::send_message(tab_id, &msg).await?;
 // Runtime
 let url = oxichrome::runtime::get_url("icon.png");
 oxichrome::runtime::send_message(&msg).await?;
+
+// Action
+oxichrome::action::set_badge_text("3", None).await?;
+oxichrome::action::set_badge_background_color("#ff6600", None).await?;
+oxichrome::action::set_title("My Extension", Some(tab_id)).await?;
+oxichrome::action::set_icon("icon.png", None).await?;
 ```
+
+`chrome.action` needs `action` in the manifest. oxichrome adds it when your extension has a `#[popup]` or an `#[on(action::on_clicked)]` handler. The click event doesn't fire while a popup is set.
+
+The `action` setters take a `tab_id`: `Some(id)` applies to that tab, `None` changes the default for all tabs. `set_badge_text("", None)` clears the badge, and `set_popup("", None)` removes the popup so clicks fire `on_clicked`.
 
 ## Build output
 
