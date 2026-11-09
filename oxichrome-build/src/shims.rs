@@ -156,6 +156,7 @@ mod tests {
             has_popup: false,
             has_options_page: false,
             content_scripts: vec![],
+            gecko_id: None,
         };
 
         let js = generate_background_js(&metadata, "counter-extension");
