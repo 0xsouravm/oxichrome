@@ -20,12 +20,12 @@ pub fn expand(attr: TokenStream, item: TokenStream) -> Result<TokenStream, syn::
     let vis = &func.vis;
     let attrs = &func.attrs;
 
-    let register_fn_name = format_ident!("__oxichrome_register_{}", fn_name);
+    let export_fn_name = format_ident!("__oxichrome_on_{}", fn_name);
+    let check_fn_name = format_ident!("__oxichrome_check_{}", fn_name);
 
     let namespace = &args.namespace;
     let event_name = &args.event_name;
 
-    // runtime::on_installed -> chrome_runtime_on_installed_add_listener
     let bridge_fn_name = format_ident!("chrome_{namespace}_{event_name}_add_listener");
 
     let param_names: Vec<_> = func
@@ -47,7 +47,7 @@ pub fn expand(attr: TokenStream, item: TokenStream) -> Result<TokenStream, syn::
         quote! { #name: #js_type }
     });
 
-    let closure_params = param_names.iter().map(|name| {
+    let export_params = param_names.iter().map(|name| {
         quote! { #name: #js_type }
     });
 
@@ -65,19 +65,19 @@ pub fn expand(attr: TokenStream, item: TokenStream) -> Result<TokenStream, syn::
 
         #[doc(hidden)]
         #[allow(dead_code)]
+        fn #check_fn_name() {
+            use oxichrome::__private::wasm_bindgen::prelude::Closure;
+            let _: fn(&Closure<dyn FnMut(#(#fnmut_params),*)>) =
+                oxichrome::core::js_bridge::#bridge_fn_name;
+        }
+
+        #[doc(hidden)]
         #[oxichrome::__private::wasm_bindgen::prelude::wasm_bindgen]
-        pub fn #register_fn_name() {
-            use oxichrome::__private::wasm_bindgen::prelude::*;
-            use oxichrome::__private::wasm_bindgen::JsCast;
-
-            let closure = Closure::wrap(Box::new(move |#(#closure_params),*| {
-                oxichrome::__private::wasm_bindgen_futures::spawn_local(async move {
-                    #fn_name(#(#forward_args),*).await;
-                });
-            }) as Box<dyn FnMut(#(#fnmut_params),*)>);
-
-            oxichrome::core::js_bridge::#bridge_fn_name(&closure);
-            closure.forget();
+        pub fn #export_fn_name(#(#export_params),*) -> oxichrome::__private::js_sys::Promise {
+            oxichrome::__private::wasm_bindgen_futures::future_to_promise(async move {
+                #fn_name(#(#forward_args),*).await;
+                Ok(#js_type::UNDEFINED)
+            })
         }
     })
 }

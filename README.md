@@ -158,6 +158,10 @@ async fn on_install(details: oxichrome::__private::wasm_bindgen::JsValue) {
 }
 ```
 
+Listeners are registered synchronously when the background script starts, and events that arrive before WASM is ready are delivered once it is. This covers `on_installed` and events that wake a stopped service worker.
+
+`#[on(runtime::on_message)]` handlers receive `(message, sender, send_response)`. Call `send_response` to reply, including after an `.await`. If no handler replies, the sender gets an empty response (`null` in Chrome, `undefined` in Firefox) once every handler has finished.
+
 ### `#[oxichrome::popup]`
 
 Marks a Leptos component as the popup UI.
