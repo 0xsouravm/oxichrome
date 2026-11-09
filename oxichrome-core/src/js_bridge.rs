@@ -44,19 +44,31 @@ extern "C" {
 
 #[wasm_bindgen]
 extern "C" {
-    #[wasm_bindgen(js_namespace = ["chrome", "tabs"], js_name = query)]
-    pub fn chrome_tabs_query(query_info: &JsValue) -> js_sys::Promise;
+    #[wasm_bindgen(catch, js_namespace = ["chrome", "tabs"], js_name = query)]
+    pub fn chrome_tabs_query(query_info: &JsValue) -> Result<js_sys::Promise, JsValue>;
 
-    #[wasm_bindgen(js_namespace = ["chrome", "tabs"], js_name = create)]
-    pub fn chrome_tabs_create(create_properties: &JsValue) -> js_sys::Promise;
+    #[wasm_bindgen(catch, js_namespace = ["chrome", "tabs"], js_name = create)]
+    pub fn chrome_tabs_create(create_properties: &JsValue) -> Result<js_sys::Promise, JsValue>;
 
-    #[wasm_bindgen(js_namespace = ["chrome", "tabs"], js_name = sendMessage)]
-    pub fn chrome_tabs_send_message(tab_id: i32, message: &JsValue) -> js_sys::Promise;
+    #[wasm_bindgen(catch, js_namespace = ["chrome", "tabs"], js_name = get)]
+    pub fn chrome_tabs_get(tab_id: i32) -> Result<js_sys::Promise, JsValue>;
+
+    #[wasm_bindgen(catch, js_namespace = ["chrome", "tabs"], js_name = update)]
+    pub fn chrome_tabs_update(tab_id: i32, update_properties: &JsValue) -> Result<js_sys::Promise, JsValue>;
+
+    #[wasm_bindgen(catch, js_namespace = ["chrome", "tabs"], js_name = remove)]
+    pub fn chrome_tabs_remove(tab_id: i32) -> Result<js_sys::Promise, JsValue>;
+
+    #[wasm_bindgen(catch, js_namespace = ["chrome", "tabs"], js_name = sendMessage)]
+    pub fn chrome_tabs_send_message(tab_id: i32, message: &JsValue) -> Result<js_sys::Promise, JsValue>;
 
     #[wasm_bindgen(js_namespace = ["chrome", "tabs", "onUpdated"], js_name = addListener)]
     pub fn chrome_tabs_on_updated_add_listener(
         callback: &Closure<dyn FnMut(JsValue, JsValue, JsValue)>,
     );
+
+    #[wasm_bindgen(js_namespace = ["chrome", "tabs", "onRemoved"], js_name = addListener)]
+    pub fn chrome_tabs_on_removed_add_listener(callback: &Closure<dyn FnMut(JsValue, JsValue)>);
 
     #[wasm_bindgen(js_namespace = ["chrome", "tabs", "onActivated"], js_name = addListener)]
     pub fn chrome_tabs_on_activated_add_listener(

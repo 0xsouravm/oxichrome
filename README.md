@@ -191,6 +191,9 @@ oxichrome::storage::remove("key").await?;
 // Tabs
 let tabs: Vec<Tab> = oxichrome::tabs::query(&query).await?;
 let tab: Tab = oxichrome::tabs::create(&props).await?;
+let tab: Tab = oxichrome::tabs::get(tab_id).await?;
+let tab: Tab = oxichrome::tabs::update(tab_id, &props).await?;
+oxichrome::tabs::remove(tab_id).await?;
 oxichrome::tabs::send_message(tab_id, &msg).await?;
 
 // Runtime
