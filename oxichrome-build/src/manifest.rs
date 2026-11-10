@@ -1,6 +1,6 @@
 use serde::Serialize;
 
-use crate::source_parser::{ActionIcon, ExtensionMetadata};
+use crate::metadata::{ActionIcon, ExtensionMetadata};
 use crate::Browser;
 use std::collections::BTreeMap;
 
@@ -188,18 +188,9 @@ mod tests {
 
     #[test]
     fn test_icons_and_action_in_manifest() {
-        let source = r#"
-            #[oxichrome::extension(
-                name = "Icons", version = "1.0.0",
-                icons = { 128 = "icons/128.png", 16 = "icons/16.png", 48 = "icons/48.png" },
-                action = { default_title = "Focus", default_icon = { 16 = "icons/16.png" } },
-            )]
-            struct Ext;
-
-            #[oxichrome::popup]
-            fn Popup() {}
-        "#;
-        let metadata = crate::source_parser::parse_source_str(source).unwrap();
+        let source = r#"{"kind":"extension","name":"Icons","version":"1.0.0","description":null,"gecko_id":null,"permissions":[],"host_permissions":[],"icons":[[16,"icons/16.png"],[48,"icons/48.png"],[128,"icons/128.png"]],"action":{"default_title":"Focus","default_icon":[[16,"icons/16.png"]]}}
+{"kind":"popup","fn_name":"Popup"}"#;
+        let metadata = crate::metadata::parse_entries(source).unwrap();
         for browser in [Browser::Chromium, Browser::Firefox] {
             let parsed: serde_json::Value =
                 serde_json::from_str(&generate_manifest(&metadata, browser).unwrap()).unwrap();
@@ -220,11 +211,8 @@ mod tests {
 
     #[test]
     fn test_action_args_alone_create_the_action() {
-        let source = r#"
-            #[oxichrome::extension(name = "A", version = "1.0.0", action = { default_icon = "a.png" })]
-            struct Ext;
-        "#;
-        let metadata = crate::source_parser::parse_source_str(source).unwrap();
+        let source = r#"{"kind":"extension","name":"A","version":"1.0.0","description":null,"gecko_id":null,"permissions":[],"host_permissions":[],"icons":[],"action":{"default_title":null,"default_icon":"a.png"}}"#;
+        let metadata = crate::metadata::parse_entries(source).unwrap();
         let parsed: serde_json::Value =
             serde_json::from_str(&generate_manifest(&metadata, Browser::Chromium).unwrap())
                 .unwrap();
@@ -234,17 +222,14 @@ mod tests {
         );
         assert!(parsed.get("icons").is_none());
 
-        let source = r#"
-            #[oxichrome::extension(name = "A", version = "1.0.0", action = {})]
-            struct Ext;
-        "#;
-        let metadata = crate::source_parser::parse_source_str(source).unwrap();
+        let source = r#"{"kind":"extension","name":"A","version":"1.0.0","description":null,"gecko_id":null,"permissions":[],"host_permissions":[],"icons":[],"action":{"default_title":null,"default_icon":null}}"#;
+        let metadata = crate::metadata::parse_entries(source).unwrap();
         let parsed: serde_json::Value =
             serde_json::from_str(&generate_manifest(&metadata, Browser::Chromium).unwrap())
                 .unwrap();
         assert_eq!(parsed["action"], serde_json::json!({}));
     }
-    use crate::source_parser::EventHandler;
+    use crate::metadata::EventHandler;
 
     fn test_metadata() -> ExtensionMetadata {
         ExtensionMetadata {
@@ -282,7 +267,7 @@ mod tests {
 
     #[test]
     fn test_generate_manifest_with_content_scripts() {
-        use crate::source_parser::ContentScript;
+        use crate::metadata::ContentScript;
 
         let metadata = ExtensionMetadata {
             name: Some("Test".to_string()),
@@ -320,7 +305,7 @@ mod tests {
 
     #[test]
     fn test_generate_manifest_content_scripts_with_options() {
-        use crate::source_parser::ContentScript;
+        use crate::metadata::ContentScript;
 
         let metadata = ExtensionMetadata {
             name: Some("Test".to_string()),

@@ -1,5 +1,7 @@
 use proc_macro2::TokenStream;
 use quote::quote;
+
+use crate::metadata;
 use syn::ItemFn;
 
 pub fn expand(item: TokenStream) -> Result<TokenStream, syn::Error> {
@@ -22,7 +24,14 @@ pub fn expand(item: TokenStream) -> Result<TokenStream, syn::Error> {
         fn_name.span(),
     );
 
+    let entry = metadata::emit(serde_json::json!({
+        "kind": "background",
+        "fn_name": fn_name.to_string(),
+    }));
+
     Ok(quote! {
+        #entry
+
         #(#attrs)*
         #vis async fn #fn_name() #fn_body
 

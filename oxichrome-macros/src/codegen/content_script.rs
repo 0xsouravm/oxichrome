@@ -1,13 +1,12 @@
 use proc_macro2::TokenStream;
 use quote::quote;
-use syn::ItemFn;
+use syn::{ItemFn, LitStr};
 
+use crate::metadata;
 use crate::parse::ContentScriptArgs;
 
 pub fn expand(attr: TokenStream, item: TokenStream) -> Result<TokenStream, syn::Error> {
     let args: ContentScriptArgs = syn::parse2(attr)?;
-    let _matches = args.matches;
-    let _all_frames = args.all_frames;
     let func: ItemFn = syn::parse2(item)?;
 
     if func.sig.asyncness.is_none() {
@@ -27,6 +26,29 @@ pub fn expand(attr: TokenStream, item: TokenStream) -> Result<TokenStream, syn::
         fn_name.span(),
     );
 
+    let run_at = match &args.run_at {
+        None => None,
+        Some(variant) => Some(match variant.to_string().as_str() {
+            "DocumentStart" => "document_start",
+            "DocumentEnd" => "document_end",
+            "DocumentIdle" => "document_idle",
+            other => {
+                return Err(syn::Error::new(
+                    variant.span(),
+                    format!("unknown run_at `{other}`; expected `DocumentStart`, `DocumentEnd` or `DocumentIdle`"),
+                ))
+            }
+        }),
+    };
+    let entry = metadata::emit(serde_json::json!({
+        "kind": "content_script",
+        "fn_name": fn_name.to_string(),
+        "matches": args.matches.iter().map(LitStr::value).collect::<Vec<_>>(),
+        "run_at": run_at,
+        "all_frames": args.all_frames,
+        "css": args.css.iter().map(LitStr::value).collect::<Vec<_>>(),
+    }));
+
     let run_at_check = args.run_at.map(|variant| {
         quote! {
             #[doc(hidden)]
@@ -43,6 +65,7 @@ pub fn expand(attr: TokenStream, item: TokenStream) -> Result<TokenStream, syn::
     }).collect();
 
     Ok(quote! {
+        #entry
         #run_at_check
         #(#css_checks)*
 

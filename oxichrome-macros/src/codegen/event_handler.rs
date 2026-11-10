@@ -3,6 +3,7 @@ use quote::{format_ident, quote, quote_spanned};
 use syn::spanned::Spanned;
 use syn::{FnArg, ItemFn};
 
+use crate::metadata;
 use crate::parse::EventArgs;
 
 pub fn expand(attr: TokenStream, item: TokenStream) -> Result<TokenStream, syn::Error> {
@@ -86,8 +87,17 @@ pub fn expand(attr: TokenStream, item: TokenStream) -> Result<TokenStream, syn::
         }
     });
 
+    let entry = metadata::emit(serde_json::json!({
+        "kind": "event",
+        "fn_name": fn_name.to_string(),
+        "namespace": namespace.to_string(),
+        "event_name": event_name.to_string(),
+    }));
+
     Ok(quote! {
         #func
+
+        #entry
 
         #[doc(hidden)]
         #[allow(dead_code)]

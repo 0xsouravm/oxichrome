@@ -1,4 +1,4 @@
-pub mod source_parser;
+pub mod metadata;
 pub mod manifest;
 pub mod shims;
 pub mod templates;

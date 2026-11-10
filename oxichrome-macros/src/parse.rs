@@ -152,6 +152,7 @@ pub struct ExtensionArgs {
     pub name: LitStr,
     pub version: LitStr,
     pub description: Option<LitStr>,
+    pub gecko_id: Option<LitStr>,
     pub permissions: Vec<LitStr>,
     pub host_permissions: Vec<LitStr>,
     pub icons: Vec<(u32, LitStr)>,
@@ -332,6 +333,7 @@ impl Parse for ExtensionArgs {
         let mut name: Option<LitStr> = None;
         let mut version: Option<LitStr> = None;
         let mut description: Option<LitStr> = None;
+        let mut gecko_id: Option<LitStr> = None;
         let mut permissions: Vec<LitStr> = Vec::new();
         let mut host_permissions: Vec<LitStr> = Vec::new();
         let mut icons: Vec<(u32, LitStr)> = Vec::new();
@@ -352,10 +354,9 @@ impl Parse for ExtensionArgs {
                     description = Some(input.parse()?);
                 }
                 "gecko_id" => {
-                    // validated but not stored — gecko_id is build-tool metadata
-                    // (manifest.json generation), not needed for code generation
-                    let gecko_id: LitStr = input.parse()?;
-                    validate_gecko_id(&gecko_id)?;
+                    let id: LitStr = input.parse()?;
+                    validate_gecko_id(&id)?;
+                    gecko_id = Some(id);
                 }
                 "permissions" => {
                     let content;
@@ -415,6 +416,7 @@ impl Parse for ExtensionArgs {
             name,
             version,
             description,
+            gecko_id,
             permissions,
             host_permissions,
             icons,

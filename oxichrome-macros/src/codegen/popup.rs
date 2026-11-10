@@ -1,5 +1,7 @@
 use proc_macro2::TokenStream;
 use quote::quote;
+
+use crate::metadata;
 use syn::ItemFn;
 
 pub fn expand(item: TokenStream) -> Result<TokenStream, syn::Error> {
@@ -12,7 +14,14 @@ pub fn expand(item: TokenStream) -> Result<TokenStream, syn::Error> {
     let sig = &func.sig;
     let ret = &sig.output;
 
+    let entry = metadata::emit(serde_json::json!({
+        "kind": "popup",
+        "fn_name": fn_name.to_string(),
+    }));
+
     Ok(quote! {
+        #entry
+
         #(#attrs)*
         #[::leptos::component]
         #vis fn #fn_name() #ret #fn_body

@@ -5,7 +5,7 @@ use toml::Value;
 use which::which;
 
 use anyhow::{bail, Context, Result};
-use oxichrome_build::{manifest, shims, source_parser, Browser};
+use oxichrome_build::{manifest, metadata, shims, Browser};
 
 pub fn run(release: bool, browser: Browser) -> Result<()> {
     let crate_dir = std::env::current_dir()?;
@@ -51,6 +51,11 @@ pub fn run(release: bool, browser: Browser) -> Result<()> {
         bail!("WASM file not found at {}", wasm_file.display());
     }
 
+    let wasm_bytes = fs::read(&wasm_file)
+        .with_context(|| format!("failed to read {}", wasm_file.display()))?;
+    let metadata = metadata::read_wasm(&wasm_bytes)
+        .with_context(|| format!("failed to read extension metadata from {}", wasm_file.display()))?;
+
     let browser_dir = match browser {
         Browser::Chromium => "chromium",
         Browser::Firefox => "firefox",
@@ -78,10 +83,11 @@ pub fn run(release: bool, browser: Browser) -> Result<()> {
         bail!("wasm-bindgen failed");
     }
 
-    let src_lib = find_lib_rs(&crate_dir)?;
-    println!("[oxichrome] Parsing {}...", src_lib.display());
-    let metadata =
-        source_parser::parse_source(&src_lib).context("failed to parse extension source")?;
+    let wasm_output = wasm_dist_dir.join(format!("{wasm_name}_bg.wasm"));
+    let bound = fs::read(&wasm_output)
+        .with_context(|| format!("failed to read {}", wasm_output.display()))?;
+    fs::write(&wasm_output, metadata::strip_wasm(&bound)?)
+        .with_context(|| format!("failed to write {}", wasm_output.display()))?;
 
     let manifest_json = manifest::generate_manifest(&metadata, browser)?;
     fs::write(dist_dir.join("manifest.json"), &manifest_json)
@@ -126,7 +132,6 @@ pub fn run(release: bool, browser: Browser) -> Result<()> {
         copy_dir_recursive(&static_dir, &dist_dir).context("failed to copy static assets")?;
     }
 
-    let wasm_output = wasm_dist_dir.join(format!("{wasm_name}_bg.wasm"));
     if command_in_path("wasm-opt") {
         println!("[oxichrome] Running wasm-opt...");
         let status = Command::new("wasm-opt")
@@ -268,14 +273,6 @@ fn cache_dir() -> Result<PathBuf> {
         .or_else(|| env("USERPROFILE"))
         .context("could not find a cache directory; set OXICHROME_CACHE_DIR")?;
     Ok(PathBuf::from(home).join(".cache").join("oxichrome"))
-}
-
-fn find_lib_rs(crate_dir: &Path) -> Result<PathBuf> {
-    let lib_rs = crate_dir.join("src").join("lib.rs");
-    if lib_rs.exists() {
-        return Ok(lib_rs);
-    }
-    bail!("could not find src/lib.rs")
 }
 
 fn extract_crate_name(content: &str) -> Option<String> {

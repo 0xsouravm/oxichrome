@@ -3,7 +3,8 @@ use quote::quote;
 use std::path::{Path, PathBuf};
 use syn::{ItemStruct, LitStr};
 
-use crate::parse::{normalize_icon_path, png_dimensions, ExtensionArgs};
+use crate::metadata;
+use crate::parse::{normalize_icon_path, png_dimensions, ExtensionArgs, IconSpec};
 
 fn find_exact(root: &Path, relative: &str) -> Result<PathBuf, String> {
     let mut current = root.to_path_buf();
@@ -89,8 +90,40 @@ pub fn expand(attr: TokenStream, item: TokenStream) -> Result<TokenStream, syn::
         .map(check_icon)
         .collect::<syn::Result<Vec<_>>>()?;
 
+    let sizes = |sizes: &[(u32, LitStr)]| -> syn::Result<serde_json::Value> {
+        sizes
+            .iter()
+            .map(|(size, path)| Ok(serde_json::json!([size, normalize_icon_path(path)?])))
+            .collect::<syn::Result<Vec<_>>>()
+            .map(serde_json::Value::Array)
+    };
+    let action = match &args.action {
+        None => serde_json::Value::Null,
+        Some(action) => serde_json::json!({
+            "default_title": action.default_title.as_ref().map(LitStr::value),
+            "default_icon": match &action.default_icon {
+                None => serde_json::Value::Null,
+                Some(IconSpec::Single(path)) => serde_json::json!(normalize_icon_path(path)?),
+                Some(IconSpec::Sizes(icons)) => sizes(icons)?,
+            },
+        }),
+    };
+    let entry = metadata::emit(serde_json::json!({
+        "kind": "extension",
+        "name": name.value(),
+        "version": version.value(),
+        "description": args.description.as_ref().map(LitStr::value),
+        "gecko_id": args.gecko_id.as_ref().map(LitStr::value),
+        "permissions": args.permissions.iter().map(LitStr::value).collect::<Vec<_>>(),
+        "host_permissions": args.host_permissions.iter().map(LitStr::value).collect::<Vec<_>>(),
+        "icons": sizes(&args.icons)?,
+        "action": action,
+    }));
+
     Ok(quote! {
         #item_struct
+
+        #entry
 
         #(#icon_checks)*
 

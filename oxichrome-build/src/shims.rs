@@ -1,6 +1,6 @@
 //! Generates JS shims and HTML shells for loading WASM in Chrome extensions.
 
-use crate::source_parser::ExtensionMetadata;
+use crate::metadata::ExtensionMetadata;
 
 fn snake_to_camel(name: &str) -> String {
     let mut parts = name.split('_');
@@ -291,7 +291,7 @@ pub fn generate_content_script_js(fn_name: &str, crate_name: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::source_parser::EventHandler;
+    use crate::metadata::EventHandler;
 
     #[test]
     fn test_background_js_es_module() {
