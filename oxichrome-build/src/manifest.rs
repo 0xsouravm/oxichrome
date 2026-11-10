@@ -27,6 +27,16 @@ struct Manifest {
     content_scripts: Vec<ContentScriptEntry>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     web_accessible_resources: Vec<WebAccessibleResource>,
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    commands: BTreeMap<String, ManifestCommand>,
+}
+
+#[derive(Serialize)]
+struct ManifestCommand {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    suggested_key: Option<BTreeMap<String, String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    description: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -149,7 +159,7 @@ pub fn generate_manifest(metadata: &ExtensionMetadata, browser: Browser) -> anyh
             .iter()
             .map(|cs| ContentScriptEntry {
                 matches: cs.matches.clone(),
-                js: vec![format!("content_script_{}.js", cs.fn_name)],
+                js: vec![cs.file_name()],
                 run_at: cs.run_at.clone(),
                 all_frames: cs.all_frames,
                 css: cs.css.clone(),
@@ -159,6 +169,31 @@ pub fn generate_manifest(metadata: &ExtensionMetadata, browser: Browser) -> anyh
             resources: vec!["wasm/*".to_string()],
             matches: vec!["<all_urls>".to_string()],
         }],
+        commands: {
+            let mut commands: BTreeMap<String, ManifestCommand> = metadata
+                .commands
+                .iter()
+                .map(|command| {
+                    (
+                        command.name.clone(),
+                        ManifestCommand {
+                            suggested_key: command.shortcut.clone(),
+                            description: Some(command.description.clone()),
+                        },
+                    )
+                })
+                .collect();
+            if let Some(shortcut) = metadata.action.as_ref().and_then(|action| action.shortcut.clone()) {
+                commands.insert(
+                    "_execute_action".to_string(),
+                    ManifestCommand {
+                        suggested_key: Some(shortcut),
+                        description: None,
+                    },
+                );
+            }
+            commands
+        },
     };
 
     let mut value = serde_json::to_value(&manifest)?;
@@ -248,7 +283,7 @@ mod tests {
             description: Some("A test extension".to_string()),
             permissions: vec!["storage".to_string(), "tabs".to_string()],
             host_permissions: vec![],
-            background_functions: vec!["start".to_string()],
+            background_exports: vec!["__oxichrome_bg_start".to_string()],
             event_handlers: vec![],
             has_popup: true,
             has_options_page: true,
@@ -257,6 +292,7 @@ mod tests {
             icons: vec![],
             action: None,
             menus: vec![],
+            commands: vec![],
         }
     }
 
@@ -286,12 +322,13 @@ mod tests {
             description: None,
             permissions: vec![],
             host_permissions: vec![],
-            background_functions: vec![],
+            background_exports: vec![],
             event_handlers: vec![],
             has_popup: false,
             has_options_page: false,
             content_scripts: vec![ContentScript {
                 fn_name: "inject".to_string(),
+                export: "__oxichrome_cs_inject".to_string(),
                 matches: vec!["<all_urls>".to_string()],
                 run_at: None,
                 all_frames: None,
@@ -301,6 +338,7 @@ mod tests {
             icons: vec![],
             action: None,
             menus: vec![],
+            commands: vec![],
         };
         let json = generate_manifest(&metadata, Browser::Chromium).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
@@ -325,12 +363,13 @@ mod tests {
             description: None,
             permissions: vec![],
             host_permissions: vec![],
-            background_functions: vec![],
+            background_exports: vec![],
             event_handlers: vec![],
             has_popup: false,
             has_options_page: false,
             content_scripts: vec![ContentScript {
                 fn_name: "inject".to_string(),
+                export: "__oxichrome_cs_inject".to_string(),
                 matches: vec!["<all_urls>".to_string()],
                 run_at: Some("document_start".to_string()),
                 all_frames: Some(true),
@@ -340,6 +379,7 @@ mod tests {
             icons: vec![],
             action: None,
             menus: vec![],
+            commands: vec![],
         };
         let json = generate_manifest(&metadata, Browser::Chromium).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
@@ -379,12 +419,13 @@ mod tests {
             icons: vec![],
             action: None,
             menus: vec![],
+            commands: vec![],
             permissions: vec!["storage".to_string()],
             host_permissions: vec![
                 "*://developer.mozilla.org/*".to_string(),
                 "*://*.example.org/*".to_string(),
             ],
-            background_functions: vec![],
+            background_exports: vec![],
             event_handlers: vec![],
             has_popup: false,
             has_options_page: false,
@@ -426,6 +467,7 @@ mod tests {
         metadata.has_popup = false;
         metadata.event_handlers = vec![EventHandler {
             fn_name: "clicked".to_string(),
+            export: "__oxichrome_on_clicked".to_string(),
             namespace: "action".to_string(),
             event_name: "on_clicked".to_string(),
         }];
@@ -453,6 +495,7 @@ mod tests {
         metadata.menus = vec![crate::metadata::MenuItem {
             id: "a".to_string(),
             handler: Some("a".to_string()),
+            export: Some("__oxichrome_menu_a".to_string()),
             item_type: "normal".to_string(),
             title: "T & a".to_string(),
             contexts: vec!["page".to_string()],
@@ -474,5 +517,57 @@ mod tests {
             serde_json::from_str(&generate_manifest(&metadata, Browser::Chromium).unwrap()).unwrap();
         assert_eq!(parsed["permissions"], serde_json::json!(["storage", "tabs", "contextMenus"]));
         assert_eq!(parsed["action"], serde_json::json!({}));
+    }
+
+    #[test]
+    fn test_commands_and_action_shortcut_in_manifest() {
+        let mut metadata = test_metadata();
+        let shortcut = |pairs: &[(&str, &str)]| {
+            pairs
+                .iter()
+                .map(|(platform, key)| (platform.to_string(), key.to_string()))
+                .collect::<crate::metadata::Shortcut>()
+        };
+        metadata.commands = vec![
+            crate::metadata::Command {
+                name: "toggle".to_string(),
+                export: "__oxichrome_command_toggle_0".to_string(),
+                description: "Toggle".to_string(),
+                shortcut: Some(shortcut(&[("default", "Alt+Shift+K"), ("mac", "MacCtrl+Shift+K")])),
+            },
+            crate::metadata::Command {
+                name: "later".to_string(),
+                export: "__oxichrome_command_later_0".to_string(),
+                description: "Later".to_string(),
+                shortcut: None,
+            },
+        ];
+        metadata.action = Some(crate::metadata::ActionMetadata {
+            default_title: None,
+            default_icon: None,
+            shortcut: Some(shortcut(&[("default", "Alt+Shift+O")])),
+        });
+        for browser in [Browser::Chromium, Browser::Firefox] {
+            let parsed: serde_json::Value =
+                serde_json::from_str(&generate_manifest(&metadata, browser).unwrap()).unwrap();
+            assert_eq!(
+                parsed["commands"],
+                serde_json::json!({
+                    "_execute_action": { "suggested_key": { "default": "Alt+Shift+O" } },
+                    "later": { "description": "Later" },
+                    "toggle": {
+                        "description": "Toggle",
+                        "suggested_key": { "default": "Alt+Shift+K", "mac": "MacCtrl+Shift+K" }
+                    }
+                })
+            );
+            assert!(parsed.get("action").is_some());
+        }
+        metadata.commands.clear();
+        metadata.action = None;
+        metadata.has_popup = false;
+        let parsed: serde_json::Value =
+            serde_json::from_str(&generate_manifest(&metadata, Browser::Chromium).unwrap()).unwrap();
+        assert!(parsed.get("commands").is_none());
     }
 }

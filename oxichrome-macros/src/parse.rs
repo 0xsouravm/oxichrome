@@ -163,6 +163,172 @@ pub struct ExtensionArgs {
 pub struct ActionArgs {
     pub default_title: Option<LitStr>,
     pub default_icon: Option<IconSpec>,
+    pub shortcut: Option<ShortcutSpec>,
+}
+
+#[derive(Debug)]
+pub struct ShortcutSpec {
+    pub keys: Vec<(String, LitStr)>,
+}
+
+impl ShortcutSpec {
+    pub fn to_json(&self) -> serde_json::Value {
+        serde_json::Value::Object(
+            self.keys
+                .iter()
+                .map(|(platform, key)| (platform.clone(), key.value().into()))
+                .collect(),
+        )
+    }
+}
+
+fn check_shortcut(key: &LitStr, platform: &str) -> syn::Result<()> {
+    crate::shortcut::check(&key.value(), platform)
+        .map_err(|reason| syn::Error::new(key.span(), format!("invalid shortcut: {reason}")))
+}
+
+pub fn parse_shortcut(input: ParseStream) -> syn::Result<ShortcutSpec> {
+    let mut keys: Vec<(String, LitStr)> = Vec::new();
+    let mut braces = None;
+    if input.peek(LitStr) {
+        let key: LitStr = input.parse()?;
+        check_shortcut(&key, "default")?;
+        keys.push(("default".to_string(), key));
+        return finish_shortcut(keys, braces);
+    }
+    let content;
+    braces = Some(syn::braced!(content in input));
+    while !content.is_empty() {
+        let platform: Ident = content.parse()?;
+        let name = platform.to_string();
+        if !crate::shortcut::PLATFORMS.contains(&name.as_str()) {
+            let reason = match name.as_str() {
+                "android" | "ios" => format!("Chrome rejects the extension when `{name}` is listed"),
+                _ => format!("unknown platform `{name}`"),
+            };
+            return Err(syn::Error::new(
+                platform.span(),
+                format!("{reason}; use `default`, `mac`, `windows`, `linux` or `chromeos`"),
+            ));
+        }
+        if keys.iter().any(|(existing, _)| *existing == name) {
+            return Err(syn::Error::new(platform.span(), format!("`{name}` is listed twice")));
+        }
+        content.parse::<Token![=]>()?;
+        let key: LitStr = content.parse()?;
+        check_shortcut(&key, &name)?;
+        keys.push((name, key));
+        if !content.is_empty() {
+            content.parse::<Token![,]>()?;
+        }
+    }
+    finish_shortcut(keys, braces)
+}
+
+fn finish_shortcut(
+    mut keys: Vec<(String, LitStr)>,
+    braces: Option<syn::token::Brace>,
+) -> syn::Result<ShortcutSpec> {
+    if !keys.iter().any(|(platform, _)| platform == "default") {
+        return Err(syn::Error::new(
+            braces.expect("a plain shortcut is the default").span.join(),
+            "add `default = \"...\"`: Chrome rejects the extension on any platform the shortcut doesn't cover",
+        ));
+    }
+    for platform in ["mac", "windows"] {
+        let (from, key) = keys
+            .iter()
+            .find(|(name, _)| name == platform)
+            .or_else(|| keys.iter().find(|(name, _)| name == "default"))
+            .unwrap();
+        let effective = if platform == "mac" {
+            crate::shortcut::effective_mac(&key.value())
+        } else {
+            key.value()
+        };
+        if let Some(reason) = crate::shortcut::reserved_by_system(platform, &effective) {
+            let fix = if from == "default" {
+                format!("add `{platform} = \"...\"` with another combination for {}", if platform == "mac" { "macOS" } else { "Windows" })
+            } else {
+                "pick another combination".to_string()
+            };
+            return Err(syn::Error::new(
+                key.span(),
+                format!("invalid shortcut: on {} `{effective}` is taken: {reason} before the browser sees it; {fix}", if platform == "mac" { "macOS" } else { "Windows" }),
+            ));
+        }
+    }
+    let default = keys.iter().position(|(platform, _)| platform == "default").unwrap();
+    keys.swap(0, default);
+    keys[1..].sort_by_key(|(platform, _)| {
+        crate::shortcut::PLATFORMS.iter().position(|known| known == platform)
+    });
+    Ok(ShortcutSpec { keys })
+}
+
+#[derive(Debug)]
+pub struct CommandArgs {
+    pub description: LitStr,
+    pub shortcut: Option<ShortcutSpec>,
+}
+
+pub fn parse_command_args(input: ParseStream) -> syn::Result<CommandArgs> {
+    let mut description: Option<LitStr> = None;
+    let mut shortcut: Option<ShortcutSpec> = None;
+    let mut seen: Vec<String> = Vec::new();
+    while !input.is_empty() {
+        let key: Ident = input.parse()?;
+        let name = key.to_string();
+        if seen.contains(&name) {
+            return Err(syn::Error::new(key.span(), format!("`{name}` is given twice")));
+        }
+        seen.push(name.clone());
+        input.parse::<Token![=]>()?;
+        match name.as_str() {
+            "description" => {
+                let text: LitStr = input.parse()?;
+                if text.value().trim().is_empty() {
+                    return Err(syn::Error::new(
+                        text.span(),
+                        "the description can't be empty: Chrome rejects the extension and shows it in its shortcut settings",
+                    ));
+                }
+                description = Some(text);
+            }
+            "shortcut" => shortcut = Some(parse_shortcut(input)?),
+            "key" | "suggested_key" | "keys" => {
+                return Err(syn::Error::new(key.span(), format!("write `shortcut = \"...\"` instead of `{name}`")))
+            }
+            "name" | "id" => {
+                return Err(syn::Error::new(
+                    key.span(),
+                    "the command is named after the function; remove `name`",
+                ))
+            }
+            "global" => {
+                return Err(syn::Error::new(
+                    key.span(),
+                    "`global` shortcuts only exist in Chrome; oxichrome doesn't support them",
+                ))
+            }
+            other => {
+                return Err(syn::Error::new(
+                    key.span(),
+                    format!("unknown command argument `{other}`; expected `description` or `shortcut`"),
+                ))
+            }
+        }
+        if !input.is_empty() {
+            input.parse::<Token![,]>()?;
+        }
+    }
+    let description = description.ok_or_else(|| {
+        syn::Error::new(
+            input.span(),
+            "add `description = \"...\"`: Chrome requires it and shows it in its shortcut settings",
+        )
+    })?;
+    Ok(CommandArgs { description, shortcut })
 }
 
 #[derive(Debug)]
@@ -244,6 +410,7 @@ fn parse_action(input: ParseStream) -> syn::Result<ActionArgs> {
     let mut action = ActionArgs {
         default_title: None,
         default_icon: None,
+        shortcut: None,
     };
     while !content.is_empty() {
         let key: Ident = content.parse()?;
@@ -259,6 +426,7 @@ fn parse_action(input: ParseStream) -> syn::Result<ActionArgs> {
                     IconSpec::Sizes(parse_icon_map(&content)?)
                 });
             }
+            "shortcut" => action.shortcut = Some(parse_shortcut(&content)?),
             "default_popup" => return Err(syn::Error::new(
                 key.span(),
                 "the popup comes from your `#[oxichrome::popup]` component; remove `default_popup`",
@@ -266,7 +434,7 @@ fn parse_action(input: ParseStream) -> syn::Result<ActionArgs> {
             other => return Err(syn::Error::new(
                 key.span(),
                 format!(
-                    "unknown action argument `{other}`; expected `default_title` or `default_icon`"
+                    "unknown action argument `{other}`; expected `default_title`, `default_icon` or `shortcut`"
                 ),
             )),
         }

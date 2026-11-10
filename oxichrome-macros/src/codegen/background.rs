@@ -4,7 +4,7 @@ use quote::quote;
 use crate::metadata;
 use syn::ItemFn;
 
-pub fn expand(item: TokenStream) -> Result<TokenStream, syn::Error> {
+pub fn expand(item: TokenStream, order: crate::codegen::Order) -> Result<TokenStream, syn::Error> {
     let func: ItemFn = syn::parse2(item)?;
 
     if func.sig.asyncness.is_none() {
@@ -19,14 +19,12 @@ pub fn expand(item: TokenStream) -> Result<TokenStream, syn::Error> {
     let vis = &func.vis;
     let attrs = &func.attrs;
 
-    let wrapper_name = syn::Ident::new(
-        &format!("__oxichrome_bg_{fn_name}"),
-        fn_name.span(),
-    );
+    let wrapper_name = crate::codegen::export_name("bg", fn_name, &order);
 
     let entry = metadata::emit(serde_json::json!({
         "kind": "background",
         "fn_name": fn_name.to_string(),
+        "export": wrapper_name.to_string(),
     }));
 
     Ok(quote! {

@@ -53,8 +53,9 @@ pub fn run(release: bool, browser: Browser) -> Result<()> {
 
     let wasm_bytes = fs::read(&wasm_file)
         .with_context(|| format!("failed to read {}", wasm_file.display()))?;
-    let metadata = metadata::read_wasm(&wasm_bytes)
+    let section = metadata::read_section(&wasm_bytes)
         .with_context(|| format!("failed to read extension metadata from {}", wasm_file.display()))?;
+    let metadata = metadata::parse_entries(&section)?;
 
     let browser_dir = match browser {
         Browser::Chromium => "chromium",
@@ -119,8 +120,8 @@ pub fn run(release: bool, browser: Browser) -> Result<()> {
     }
 
     for cs in &metadata.content_scripts {
-        let cs_js = shims::generate_content_script_js(&cs.fn_name, &crate_name);
-        let cs_filename = format!("content_script_{}.js", cs.fn_name);
+        let cs_js = shims::generate_content_script_js(&cs.fn_name, &cs.export, &crate_name);
+        let cs_filename = cs.file_name();
         fs::write(dist_dir.join(&cs_filename), &cs_js)
             .with_context(|| format!("failed to write {cs_filename}"))?;
         println!("[oxichrome] Generated {cs_filename}");

@@ -1,5 +1,6 @@
 use anyhow::{anyhow, bail, Context};
 use serde::Deserialize;
+use std::collections::BTreeMap;
 
 pub const SECTION: &str = "oxichrome.v1";
 
@@ -10,7 +11,7 @@ pub struct ExtensionMetadata {
     pub description: Option<String>,
     pub permissions: Vec<String>,
     pub host_permissions: Vec<String>,
-    pub background_functions: Vec<String>,
+    pub background_exports: Vec<String>,
     pub event_handlers: Vec<EventHandler>,
     pub has_popup: bool,
     pub has_options_page: bool,
@@ -19,12 +20,35 @@ pub struct ExtensionMetadata {
     pub icons: Vec<(u32, String)>,
     pub action: Option<ActionMetadata>,
     pub menus: Vec<MenuItem>,
+    pub commands: Vec<Command>,
+}
+
+pub type Shortcut = BTreeMap<String, String>;
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Command {
+    pub name: String,
+    pub export: String,
+    pub description: String,
+    pub shortcut: Option<Shortcut>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct CommandEntry {
+    name: String,
+    export: String,
+    description: String,
+    shortcut: Option<Shortcut>,
+    file: String,
+    line: usize,
+    column: usize,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct MenuItem {
     pub id: String,
     pub handler: Option<String>,
+    pub export: Option<String>,
     pub item_type: String,
     pub title: String,
     pub contexts: Vec<String>,
@@ -40,6 +64,7 @@ pub struct MenuItem {
 struct MenuEntry {
     id: String,
     handler: Option<String>,
+    export: Option<String>,
     item_type: String,
     title: String,
     contexts: Option<Vec<String>>,
@@ -58,6 +83,8 @@ struct MenuEntry {
 pub struct ActionMetadata {
     pub default_title: Option<String>,
     pub default_icon: Option<ActionIcon>,
+    #[serde(default)]
+    pub shortcut: Option<Shortcut>,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -70,6 +97,7 @@ pub enum ActionIcon {
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 pub struct EventHandler {
     pub fn_name: String,
+    pub export: String,
     pub namespace: String,
     pub event_name: String,
 }
@@ -77,11 +105,18 @@ pub struct EventHandler {
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 pub struct ContentScript {
     pub fn_name: String,
+    pub export: String,
     pub matches: Vec<String>,
     pub run_at: Option<String>,
     pub all_frames: Option<bool>,
     #[serde(default)]
     pub css: Vec<String>,
+}
+
+impl ContentScript {
+    pub fn file_name(&self) -> String {
+        format!("content_script_{}.js", self.export.trim_start_matches("__oxichrome_cs_"))
+    }
 }
 
 #[derive(Deserialize)]
@@ -99,9 +134,11 @@ enum Entry {
     },
     Background {
         fn_name: String,
+        export: String,
     },
     Event {
         fn_name: String,
+        export: String,
         namespace: String,
         event_name: String,
     },
@@ -113,12 +150,14 @@ enum Entry {
     },
     ContentScript {
         fn_name: String,
+        export: String,
         matches: Vec<String>,
         run_at: Option<String>,
         all_frames: Option<bool>,
         css: Vec<String>,
     },
     Menu(MenuEntry),
+    Command(CommandEntry),
 }
 
 fn read_leb128(bytes: &[u8], pos: &mut usize) -> anyhow::Result<usize> {
@@ -186,15 +225,18 @@ fn sections(wasm: &[u8]) -> anyhow::Result<Vec<Section>> {
     Ok(found)
 }
 
-pub fn read_wasm(wasm: &[u8]) -> anyhow::Result<ExtensionMetadata> {
+pub fn read_section(wasm: &[u8]) -> anyhow::Result<String> {
     let mut payload = Vec::new();
     for section in sections(wasm)? {
         if section.custom_name.as_deref() == Some(SECTION) {
             payload.extend_from_slice(&wasm[section.payload_start..section.end]);
         }
     }
-    let text = std::str::from_utf8(&payload).context("oxichrome metadata is not UTF-8")?;
-    parse_entries(text)
+    String::from_utf8(payload).context("oxichrome metadata is not UTF-8")
+}
+
+pub fn read_wasm(wasm: &[u8]) -> anyhow::Result<ExtensionMetadata> {
+    parse_entries(&read_section(wasm)?)
 }
 
 pub fn strip_wasm(wasm: &[u8]) -> anyhow::Result<Vec<u8>> {
@@ -213,6 +255,8 @@ pub fn parse_entries(text: &str) -> anyhow::Result<ExtensionMetadata> {
     let mut popups = Vec::new();
     let mut options_pages = Vec::new();
     let mut menus = Vec::new();
+    let mut commands = Vec::new();
+    let mut backgrounds: Vec<(String, String)> = Vec::new();
     for line in text.lines().filter(|line| !line.trim().is_empty()) {
         let entry: Entry = serde_json::from_str(line).with_context(|| {
             format!(
@@ -240,13 +284,15 @@ pub fn parse_entries(text: &str) -> anyhow::Result<ExtensionMetadata> {
                 metadata.icons = icons;
                 metadata.action = action;
             }
-            Entry::Background { fn_name } => metadata.background_functions.push(fn_name),
+            Entry::Background { fn_name, export } => backgrounds.push((fn_name, export)),
             Entry::Event {
                 fn_name,
+                export,
                 namespace,
                 event_name,
             } => metadata.event_handlers.push(EventHandler {
                 fn_name,
+                export,
                 namespace,
                 event_name,
             }),
@@ -254,18 +300,21 @@ pub fn parse_entries(text: &str) -> anyhow::Result<ExtensionMetadata> {
             Entry::OptionsPage { fn_name } => options_pages.push(fn_name),
             Entry::ContentScript {
                 fn_name,
+                export,
                 matches,
                 run_at,
                 all_frames,
                 css,
             } => metadata.content_scripts.push(ContentScript {
                 fn_name,
+                export,
                 matches,
                 run_at,
                 all_frames,
                 css,
             }),
             Entry::Menu(menu) => menus.push(menu),
+            Entry::Command(command) => commands.push(command),
         }
     }
 
@@ -298,16 +347,22 @@ pub fn parse_entries(text: &str) -> anyhow::Result<ExtensionMetadata> {
         );
     }
     metadata.menus = resolve_menus(menus)?;
+    let action_shortcut = metadata
+        .action
+        .as_ref()
+        .and_then(|action| action.shortcut.clone());
+    metadata.commands = resolve_commands(commands, action_shortcut.as_ref())?;
     metadata.has_popup = !popups.is_empty();
     metadata.has_options_page = !options_pages.is_empty();
 
-    metadata.background_functions.sort();
+    backgrounds.sort();
+    metadata.background_exports = backgrounds.into_iter().map(|(_, export)| export).collect();
     metadata
         .event_handlers
-        .sort_by(|a, b| a.fn_name.cmp(&b.fn_name));
+        .sort_by(|a, b| (&a.fn_name, &a.export).cmp(&(&b.fn_name, &b.export)));
     metadata
         .content_scripts
-        .sort_by(|a, b| a.fn_name.cmp(&b.fn_name));
+        .sort_by(|a, b| (&a.fn_name, &a.export).cmp(&(&b.fn_name, &b.export)));
     Ok(metadata)
 }
 
@@ -399,6 +454,7 @@ fn resolve_menus(mut entries: Vec<MenuEntry>) -> anyhow::Result<Vec<MenuItem>> {
             ordered.push(MenuItem {
                 id: entry.id.clone(),
                 handler: entry.handler.clone(),
+                export: entry.export.clone(),
                 item_type: entry.item_type.clone(),
                 title: entry.title.clone(),
                 contexts: contexts_of(entries, entry),
@@ -417,6 +473,108 @@ fn resolve_menus(mut entries: Vec<MenuEntry>) -> anyhow::Result<Vec<MenuItem>> {
 }
 
 pub const ACTION_MENU_TOP_LEVEL_LIMIT: usize = 6;
+
+pub const SHORTCUT_LIMIT: usize = 4;
+
+const SHORTCUT_PLATFORMS: [&str; 4] = ["windows", "mac", "linux", "chromeos"];
+
+fn platform_key(shortcut: &Shortcut, platform: &str) -> Option<String> {
+    let key = shortcut.get(platform).or_else(|| shortcut.get("default"))?;
+    Some(if platform == "mac" {
+        key.split('+')
+            .map(|part| if part == "Ctrl" { "Command" } else { part })
+            .collect::<Vec<_>>()
+            .join("+")
+    } else {
+        key.clone()
+    })
+}
+
+fn platform_label(platform: &str) -> &str {
+    match platform {
+        "mac" => "macOS",
+        "windows" => "Windows",
+        "linux" => "Linux",
+        _ => "ChromeOS",
+    }
+}
+
+fn resolve_commands(
+    mut entries: Vec<CommandEntry>,
+    action: Option<&Shortcut>,
+) -> anyhow::Result<Vec<Command>> {
+    entries.sort_by(|a, b| (&a.file, a.line, a.column).cmp(&(&b.file, b.line, b.column)));
+
+    let mut names: Vec<&str> = entries.iter().map(|entry| entry.name.as_str()).collect();
+    names.sort();
+    if let Some(pair) = names.windows(2).find(|pair| pair[0] == pair[1]) {
+        let places: Vec<String> = entries
+            .iter()
+            .filter(|entry| entry.name == pair[0])
+            .map(|entry| format!("{}:{}", entry.file, entry.line))
+            .collect();
+        bail!(
+            "two commands are named `{}` ({}); commands need different names because the function name is the command's id",
+            pair[0],
+            places.join(", ")
+        );
+    }
+
+    let mut bound: Vec<(String, &Shortcut)> = Vec::new();
+    if let Some(shortcut) = action {
+        bound.push(("the toolbar button (`action = { shortcut }`)".to_string(), shortcut));
+    }
+    for entry in &entries {
+        if let Some(shortcut) = &entry.shortcut {
+            bound.push((format!("`{}` ({}:{})", entry.name, entry.file, entry.line), shortcut));
+        }
+    }
+    if bound.len() > SHORTCUT_LIMIT {
+        bail!(
+            "{} commands have a shortcut ({}); Chrome rejects an extension that suggests more than {SHORTCUT_LIMIT}, so leave `shortcut` out of the rest and people can assign those themselves",
+            bound.len(),
+            bound.iter().map(|(name, _)| name.as_str()).collect::<Vec<_>>().join(", ")
+        );
+    }
+    for (index, (name, shortcut)) in bound.iter().enumerate() {
+        for (other, earlier) in &bound[..index] {
+            let clashes: Vec<(&str, String)> = SHORTCUT_PLATFORMS
+                .iter()
+                .filter_map(|platform| {
+                    let key = platform_key(shortcut, platform)?;
+                    (platform_key(earlier, platform).as_ref() == Some(&key)).then_some((*platform, key))
+                })
+                .collect();
+            let Some((_, first_key)) = clashes.first() else {
+                continue;
+            };
+            let place = if clashes.len() == SHORTCUT_PLATFORMS.len()
+                && clashes.iter().all(|(platform, key)| *platform == "mac" || key == first_key)
+            {
+                format!("`{first_key}`")
+            } else {
+                clashes
+                    .iter()
+                    .map(|(platform, key)| format!("`{key}` on {}", platform_label(platform)))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            };
+            bail!(
+                "{other} and {name} both use {place}; the browser gives it to only one of them, so change one"
+            );
+        }
+    }
+
+    Ok(entries
+        .into_iter()
+        .map(|entry| Command {
+            name: entry.name,
+            export: entry.export,
+            description: entry.description,
+            shortcut: entry.shortcut,
+        })
+        .collect())
+}
 
 #[cfg(test)]
 mod tests {
@@ -455,7 +613,7 @@ mod tests {
     #[test]
     fn reads_every_metadata_section_and_strips_them() {
         let first = format!("{EXTENSION}\n{{\"kind\":\"popup\",\"fn_name\":\"Popup\"}}\n");
-        let second = "{\"kind\":\"event\",\"fn_name\":\"b\",\"namespace\":\"tabs\",\"event_name\":\"on_removed\"}\n{\"kind\":\"event\",\"fn_name\":\"a\",\"namespace\":\"runtime\",\"event_name\":\"on_installed\"}\n";
+        let second = "{\"kind\":\"event\",\"fn_name\":\"b\",\"export\":\"__oxichrome_on_b\",\"namespace\":\"tabs\",\"event_name\":\"on_removed\"}\n{\"kind\":\"event\",\"fn_name\":\"a\",\"export\":\"__oxichrome_on_a\",\"namespace\":\"runtime\",\"event_name\":\"on_installed\"}\n";
         let big = "x".repeat(300);
         let binary = wasm(&[
             section(SECTION, first.as_bytes()),
@@ -517,8 +675,8 @@ mod tests {
     #[test]
     fn reads_icons_action_and_content_scripts() {
         let text = r#"{"kind":"extension","name":"Icons","version":"1.2.3","description":"d","gecko_id":"a@b.c","permissions":["storage"],"host_permissions":["https://example.org/*"],"icons":[[16,"icons/16.png"],[128,"icons/128.png"]],"action":{"default_title":"Hi","default_icon":[[16,"icons/16.png"]]}}
-{"kind":"content_script","fn_name":"inject","matches":["<all_urls>"],"run_at":"document_start","all_frames":true,"css":["a.css"]}
-{"kind":"background","fn_name":"start"}
+{"kind":"content_script","fn_name":"inject","export":"__oxichrome_cs_inject","matches":["<all_urls>"],"run_at":"document_start","all_frames":true,"css":["a.css"]}
+{"kind":"background","fn_name":"start","export":"__oxichrome_bg_start"}
 {"kind":"options_page","fn_name":"Options"}"#;
         let metadata = parse_entries(text).unwrap();
         assert_eq!(metadata.version.as_deref(), Some("1.2.3"));
@@ -535,19 +693,21 @@ mod tests {
             Some(ActionMetadata {
                 default_title: Some("Hi".to_string()),
                 default_icon: Some(ActionIcon::Sizes(vec![(16, "icons/16.png".to_string())])),
+                shortcut: None,
             })
         );
         assert_eq!(
             metadata.content_scripts,
             vec![ContentScript {
                 fn_name: "inject".to_string(),
+                export: "__oxichrome_cs_inject".to_string(),
                 matches: vec!["<all_urls>".to_string()],
                 run_at: Some("document_start".to_string()),
                 all_frames: Some(true),
                 css: vec!["a.css".to_string()],
             }]
         );
-        assert_eq!(metadata.background_functions, ["start"]);
+        assert_eq!(metadata.background_exports, ["__oxichrome_bg_start"]);
         assert!(metadata.has_options_page);
         assert!(!metadata.has_popup);
 
@@ -610,5 +770,59 @@ mod tests {
         }
         let six: Vec<String> = (0..6).map(|i| with(&menu(&format!("a{i}"), "", i), "contexts", "[\"action\"]")).collect();
         assert_eq!(menus(&six).unwrap().len(), 6);
+    }
+
+    fn commands(lines: &[String], action: Option<&str>) -> anyhow::Result<Vec<Command>> {
+        let action = action.map(|key| format!(r#","action":{{"default_title":null,"default_icon":null,"shortcut":{key}}}"#)).unwrap_or_default();
+        let mut text = format!(r#"{{"kind":"extension","name":"A","version":"1.0.0","description":null,"gecko_id":null,"permissions":[],"host_permissions":[],"icons":[]{action}}}"#);
+        if action.is_empty() {
+            text = text.replace(r#""icons":[]}"#, r#""icons":[],"action":null}"#);
+        }
+        for line in lines {
+            text.push('\n');
+            text.push_str(line);
+        }
+        parse_entries(&text).map(|metadata| metadata.commands)
+    }
+
+    fn command(name: &str, shortcut: &str, line: usize) -> String {
+        format!(r#"{{"kind":"command","name":"{name}","export":"__oxichrome_command_{name}_0","description":"d","shortcut":{shortcut},"file":"src/lib.rs","line":{line},"column":1}}"#)
+    }
+
+    #[test]
+    fn commands_keep_their_shortcuts_in_source_order() {
+        let parsed = commands(
+            &[
+                command("b", r#"{"default":"Alt+Shift+B"}"#, 2),
+                command("a", "null", 1),
+            ],
+            Some(r#"{"default":"Alt+Shift+O"}"#),
+        )
+        .unwrap();
+        assert_eq!(parsed.iter().map(|c| c.name.as_str()).collect::<Vec<_>>(), ["a", "b"]);
+        assert_eq!(parsed[0].shortcut, None);
+        assert_eq!(parsed[1].shortcut.as_ref().unwrap()["default"], "Alt+Shift+B");
+        assert_eq!(parsed[1].export, "__oxichrome_command_b_0");
+    }
+
+    #[test]
+    fn command_mistakes_are_build_errors() {
+        let key = |k: &str| format!(r#"{{"default":"{k}"}}"#);
+        let cases: Vec<(Vec<String>, Option<String>, &str)> = vec![
+            (vec![command("go", "null", 1), command("go", "null", 2)], None, "two commands are named `go` (src/lib.rs:1, src/lib.rs:2)"),
+            (vec![command("a", &key("Alt+Shift+K"), 1), command("b", &key("Alt+Shift+K"), 2)], None, "`a` (src/lib.rs:1) and `b` (src/lib.rs:2) both use `Alt+Shift+K`;"),
+            (vec![command("a", &key("Alt+Shift+K"), 1)], Some(key("Alt+Shift+K")), "the toolbar button (`action = { shortcut }`) and `a` (src/lib.rs:1) both use `Alt+Shift+K`"),
+            (vec![command("a", &key("Ctrl+Shift+Y"), 1), command("b", r#"{"default":"Alt+Shift+Y","mac":"Command+Shift+Y"}"#, 2)], None, "both use `Command+Shift+Y` on macOS;"),
+            ((1..=5).map(|i| command(&format!("c{i}"), &key(&format!("Alt+Shift+{i}")), i)).collect(), None, "5 commands have a shortcut"),
+            ((1..=4).map(|i| command(&format!("c{i}"), &key(&format!("Alt+Shift+{i}")), i)).collect(), Some(key("Alt+Shift+O")), "5 commands have a shortcut (the toolbar button"),
+        ];
+        for (lines, action, expected) in cases {
+            let err = commands(&lines, action.as_deref()).unwrap_err().to_string();
+            assert!(err.contains(expected), "{err}");
+        }
+        let four: Vec<String> = (1..=4).map(|i| command(&format!("c{i}"), &key(&format!("Alt+Shift+{i}")), i)).collect();
+        assert_eq!(commands(&four, None).unwrap().len(), 4);
+        let unbound: Vec<String> = (1..=9).map(|i| command(&format!("c{i}"), "null", i)).collect();
+        assert_eq!(commands(&unbound, Some(&key("Alt+Shift+O"))).unwrap().len(), 9);
     }
 }

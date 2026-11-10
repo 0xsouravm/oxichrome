@@ -5,7 +5,7 @@ use syn::{ItemFn, LitStr};
 use crate::metadata;
 use crate::parse::ContentScriptArgs;
 
-pub fn expand(attr: TokenStream, item: TokenStream) -> Result<TokenStream, syn::Error> {
+pub fn expand(attr: TokenStream, item: TokenStream, order: crate::codegen::Order) -> Result<TokenStream, syn::Error> {
     let args: ContentScriptArgs = syn::parse2(attr)?;
     let func: ItemFn = syn::parse2(item)?;
 
@@ -21,10 +21,7 @@ pub fn expand(attr: TokenStream, item: TokenStream) -> Result<TokenStream, syn::
     let vis = &func.vis;
     let attrs = &func.attrs;
 
-    let wrapper_name = syn::Ident::new(
-        &format!("__oxichrome_cs_{fn_name}"),
-        fn_name.span(),
-    );
+    let wrapper_name = crate::codegen::export_name("cs", fn_name, &order);
 
     let run_at = match &args.run_at {
         None => None,
@@ -43,6 +40,7 @@ pub fn expand(attr: TokenStream, item: TokenStream) -> Result<TokenStream, syn::
     let entry = metadata::emit(serde_json::json!({
         "kind": "content_script",
         "fn_name": fn_name.to_string(),
+        "export": wrapper_name.to_string(),
         "matches": args.matches.iter().map(LitStr::value).collect::<Vec<_>>(),
         "run_at": run_at,
         "all_frames": args.all_frames,

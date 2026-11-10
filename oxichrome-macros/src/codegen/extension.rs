@@ -106,6 +106,7 @@ pub fn expand(attr: TokenStream, item: TokenStream) -> Result<TokenStream, syn::
                 Some(IconSpec::Single(path)) => serde_json::json!(normalize_icon_path(path)?),
                 Some(IconSpec::Sizes(icons)) => sizes(icons)?,
             },
+            "shortcut": action.shortcut.as_ref().map(|shortcut| shortcut.to_json()),
         }),
     };
     let entry = metadata::emit(serde_json::json!({

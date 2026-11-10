@@ -3,14 +3,9 @@ use quote::{format_ident, quote, quote_spanned};
 use syn::spanned::Spanned;
 use syn::{FnArg, Ident, ItemFn, ItemStruct, LitStr};
 
+use crate::codegen::{export_name, Order};
 use crate::metadata;
 use crate::parse::{parse_menu_args, MenuArgs, MenuKind};
-
-pub struct Order {
-    pub file: String,
-    pub line: usize,
-    pub column: usize,
-}
 
 fn context_mask(args: &MenuArgs) -> Option<TokenStream> {
     let contexts = args.contexts.as_ref()?;
@@ -27,7 +22,7 @@ fn selection_only(args: &MenuArgs) -> bool {
         .is_some_and(|contexts| contexts.len() == 1 && contexts[0] == "selection")
 }
 
-fn entry(args: &MenuArgs, id: &Ident, item_type: &str, handler: Option<&Ident>, order: &Order) -> TokenStream {
+fn entry(args: &MenuArgs, id: &Ident, item_type: &str, handler: Option<&Ident>, export: Option<&Ident>, order: &Order) -> TokenStream {
     let checked = match args.kind {
         MenuKind::Normal => None,
         MenuKind::Checkbox(checked) | MenuKind::Radio(checked) => Some(checked),
@@ -41,6 +36,7 @@ fn entry(args: &MenuArgs, id: &Ident, item_type: &str, handler: Option<&Ident>, 
         "kind": "menu",
         "id": id.to_string(),
         "handler": handler.map(Ident::to_string),
+        "export": export.map(Ident::to_string),
         "item_type": item_type,
         "title": args.title.value(),
         "contexts": args.contexts.as_ref().map(|contexts| contexts.iter().map(Ident::to_string).collect::<Vec<_>>()),
@@ -134,10 +130,10 @@ pub fn expand_menu(attr: TokenStream, item: TokenStream, order: Order) -> syn::R
         MenuKind::Checkbox(_) => "checkbox",
         MenuKind::Radio(_) => "radio",
     };
-    let entry = entry(&args, fn_name, item_type, Some(fn_name), &order);
+    let export = export_name("menu", fn_name, &order);
+    let entry = entry(&args, fn_name, item_type, Some(fn_name), Some(&export), &order);
     let parent_check = parent_check(&args);
 
-    let export = format_ident!("__oxichrome_menu_{}", fn_name);
     let js_type = quote! { oxichrome::__private::wasm_bindgen::JsValue };
     let call = match arg_types.first() {
         None => quote! { #fn_name().await; },
@@ -203,7 +199,7 @@ pub fn expand_submenu(attr: TokenStream, item: TokenStream, order: Order) -> syn
     let name = &item_struct.ident;
     let id = name.to_string();
     let selection_only = selection_only(&args);
-    let entry = entry(&args, name, "submenu", None, &order);
+    let entry = entry(&args, name, "submenu", None, None, &order);
     let parent_check = parent_check(&args);
     let contexts = match (context_mask(&args), &args.parent) {
         (Some(mask), _) => mask,

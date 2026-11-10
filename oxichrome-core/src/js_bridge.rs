@@ -219,3 +219,15 @@ extern "C" {
         properties: &JsValue,
     ) -> Result<js_sys::Promise, JsValue>;
 }
+
+#[wasm_bindgen]
+extern "C" {
+    #[wasm_bindgen(catch, js_namespace = ["chrome", "commands"], js_name = getAll)]
+    pub fn chrome_commands_get_all() -> Result<js_sys::Promise, JsValue>;
+}
+
+#[wasm_bindgen(inline_js = "export function open_shortcut_settings() { const api = globalThis.browser?.commands; if (typeof api?.openShortcutSettings === 'function') { return api.openShortcutSettings(); } return chrome.tabs.create({ url: 'chrome://extensions/shortcuts' }).then(() => undefined); }")]
+extern "C" {
+    #[wasm_bindgen(catch)]
+    pub fn open_shortcut_settings() -> Result<js_sys::Promise, JsValue>;
+}

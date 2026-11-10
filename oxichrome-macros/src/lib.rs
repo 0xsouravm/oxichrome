@@ -4,6 +4,7 @@ mod codegen;
 mod error;
 mod metadata;
 mod parse;
+mod shortcut;
 
 /// ```ignore
 /// #[oxichrome::extension(
@@ -22,7 +23,7 @@ pub fn extension(attr: TokenStream, item: TokenStream) -> TokenStream {
 
 #[proc_macro_attribute]
 pub fn background(_attr: TokenStream, item: TokenStream) -> TokenStream {
-    codegen::background::expand(item.into())
+    codegen::background::expand(item.into(), order())
         .unwrap_or_else(|e| e.into_compile_error())
         .into()
 }
@@ -33,7 +34,7 @@ pub fn background(_attr: TokenStream, item: TokenStream) -> TokenStream {
 /// ```
 #[proc_macro_attribute]
 pub fn on(attr: TokenStream, item: TokenStream) -> TokenStream {
-    codegen::event_handler::expand(attr.into(), item.into())
+    codegen::event_handler::expand(attr.into(), item.into(), order())
         .unwrap_or_else(|e| e.into_compile_error())
         .into()
 }
@@ -72,14 +73,14 @@ pub fn options_page(_attr: TokenStream, item: TokenStream) -> TokenStream {
 /// ```
 #[proc_macro_attribute]
 pub fn content_script(attr: TokenStream, item: TokenStream) -> TokenStream {
-    codegen::content_script::expand(attr.into(), item.into())
+    codegen::content_script::expand(attr.into(), item.into(), order())
         .unwrap_or_else(|e| e.into_compile_error())
         .into()
 }
 
-fn order() -> codegen::menu::Order {
+fn order() -> codegen::Order {
     let span = proc_macro::Span::call_site();
-    codegen::menu::Order {
+    codegen::Order {
         file: span.file(),
         line: span.line(),
         column: span.column(),
@@ -104,6 +105,17 @@ pub fn menu(attr: TokenStream, item: TokenStream) -> TokenStream {
 #[proc_macro_attribute]
 pub fn submenu(attr: TokenStream, item: TokenStream) -> TokenStream {
     codegen::menu::expand_submenu(attr.into(), item.into(), order())
+        .unwrap_or_else(|e| e.into_compile_error())
+        .into()
+}
+
+/// ```ignore
+/// #[oxichrome::command(description = "Toggle dark mode", shortcut = "Alt+Shift+D")]
+/// async fn toggle_dark(press: commands::Press) { }
+/// ```
+#[proc_macro_attribute]
+pub fn command(attr: TokenStream, item: TokenStream) -> TokenStream {
+    codegen::command::expand(attr.into(), item.into(), order())
         .unwrap_or_else(|e| e.into_compile_error())
         .into()
 }

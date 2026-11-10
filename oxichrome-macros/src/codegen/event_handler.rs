@@ -6,7 +6,7 @@ use syn::{FnArg, ItemFn};
 use crate::metadata;
 use crate::parse::EventArgs;
 
-pub fn expand(attr: TokenStream, item: TokenStream) -> Result<TokenStream, syn::Error> {
+pub fn expand(attr: TokenStream, item: TokenStream, order: crate::codegen::Order) -> Result<TokenStream, syn::Error> {
     let args: EventArgs = syn::parse2(attr)?;
     let func: ItemFn = syn::parse2(item)?;
 
@@ -14,6 +14,13 @@ pub fn expand(attr: TokenStream, item: TokenStream) -> Result<TokenStream, syn::
         return Err(syn::Error::new_spanned(
             &args.namespace,
             "context menu clicks go to each item's own handler: put `#[oxichrome::menu(title = \"...\")]` on an async fn instead",
+        ));
+    }
+
+    if args.namespace == "commands" {
+        return Err(syn::Error::new_spanned(
+            &args.namespace,
+            "each keyboard command has its own handler: put `#[oxichrome::command(description = \"...\")]` on an async fn instead",
         ));
     }
 
@@ -39,7 +46,7 @@ pub fn expand(attr: TokenStream, item: TokenStream) -> Result<TokenStream, syn::
         }
     }
 
-    let export_fn_name = format_ident!("__oxichrome_on_{}", fn_name);
+    let export_fn_name = crate::codegen::export_name("on", fn_name, &order);
     let check_fn_name = format_ident!("__oxichrome_check_{}", fn_name);
 
     let namespace = &args.namespace;
@@ -71,7 +78,6 @@ pub fn expand(attr: TokenStream, item: TokenStream) -> Result<TokenStream, syn::
             }
         });
 
-    let fnmut_params = raw_args.iter().map(|_| quote! { #js_type });
 
     let camel = |ident: &syn::Ident| {
         ident
@@ -94,9 +100,15 @@ pub fn expand(attr: TokenStream, item: TokenStream) -> Result<TokenStream, syn::
         }
     });
 
+    let arg_count = arg_types.len();
+    let too_many = format!(
+        "`{fn_name}` takes {arg_count} arguments, more than `{namespace}::{event_name}` passes; remove the extra ones"
+    );
+
     let entry = metadata::emit(serde_json::json!({
         "kind": "event",
         "fn_name": fn_name.to_string(),
+        "export": export_fn_name.to_string(),
         "namespace": namespace.to_string(),
         "event_name": event_name.to_string(),
     }));
@@ -109,11 +121,15 @@ pub fn expand(attr: TokenStream, item: TokenStream) -> Result<TokenStream, syn::
         #[doc(hidden)]
         #[allow(dead_code)]
         fn #check_fn_name() {
-            use oxichrome::__private::wasm_bindgen::prelude::Closure;
-            let _: fn(&Closure<dyn FnMut(#(#fnmut_params),*)>) =
-                oxichrome::core::js_bridge::#bridge_fn_name;
+            let _ = oxichrome::core::js_bridge::#bridge_fn_name;
             #(#arg_checks)*
         }
+
+        #[doc(hidden)]
+        const _: () = assert!(
+            #arg_count <= <oxichrome::core::event::events::#marker as oxichrome::core::event::Event>::ARGS,
+            #too_many
+        );
 
         #[doc(hidden)]
         #[oxichrome::__private::wasm_bindgen::prelude::wasm_bindgen]

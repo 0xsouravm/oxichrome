@@ -5,7 +5,7 @@ use crate::error::{OxichromeError, Result};
 #[diagnostic::on_unimplemented(
     message = "`{Self}` can't be an event handler argument",
     label = "unsupported argument type",
-    note = "use `JsValue`, `String`, `bool`, `u32`, an `Option` of those, or a type oxichrome provides for this event such as `alarms::Alarm` or `context_menus::Click`"
+    note = "use `JsValue`, `String`, `bool`, `u32`, an `Option` of those, or a type oxichrome provides for this event such as `alarms::Alarm`, `context_menus::Click` or `commands::Press`"
 )]
 pub trait FromEventArg: Sized {
     fn from_event_arg(value: JsValue) -> Result<Self>;
@@ -68,6 +68,10 @@ impl<Event, const POSITION: usize> EventArg<Event, POSITION> for JsValue {}
 #[doc(hidden)]
 pub fn assert_arg<T: EventArg<Event, POSITION>, Event, const POSITION: usize>() {}
 
+pub trait Event {
+    const ARGS: usize;
+}
+
 pub mod events {
     pub struct RuntimeOnInstalled;
     pub struct RuntimeOnMessage;
@@ -81,6 +85,31 @@ pub mod events {
     pub struct NotificationsOnClosed;
     pub struct NotificationsOnButtonClicked;
     pub struct ContextMenusOnClicked;
+    pub struct CommandsOnCommand;
+}
+
+macro_rules! arity {
+    ($($event:ident = $args:literal),* $(,)?) => {
+        $(impl Event for events::$event {
+            const ARGS: usize = $args;
+        })*
+    };
+}
+
+arity! {
+    RuntimeOnInstalled = 1,
+    RuntimeOnMessage = 3,
+    StorageOnChanged = 2,
+    TabsOnUpdated = 3,
+    TabsOnRemoved = 2,
+    TabsOnActivated = 1,
+    ActionOnClicked = 1,
+    AlarmsOnAlarm = 1,
+    NotificationsOnClicked = 1,
+    NotificationsOnClosed = 2,
+    NotificationsOnButtonClicked = 2,
+    ContextMenusOnClicked = 2,
+    CommandsOnCommand = 2,
 }
 
 impl EventArg<events::NotificationsOnClicked, 1> for String {}
