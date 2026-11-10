@@ -14,7 +14,11 @@ struct Manifest {
     #[serde(skip_serializing_if = "Vec::is_empty")]
     permissions: Vec<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
+    optional_permissions: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     host_permissions: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    optional_host_permissions: Vec<String>,
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     icons: BTreeMap<u32, String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -92,6 +96,22 @@ struct WebAccessibleResource {
     matches: Vec<String>,
 }
 
+pub fn left_out_permissions(metadata: &ExtensionMetadata, browser: Browser) -> &[(String, String)] {
+    match browser {
+        Browser::Chromium => &metadata.firefox_only,
+        Browser::Firefox => &metadata.chrome_only,
+    }
+}
+
+fn for_browser(names: &[String], metadata: &ExtensionMetadata, browser: Browser) -> Vec<String> {
+    let left_out = left_out_permissions(metadata, browser);
+    names
+        .iter()
+        .filter(|name| !left_out.iter().any(|(left, _)| left == *name))
+        .cloned()
+        .collect()
+}
+
 pub fn generate_manifest(metadata: &ExtensionMetadata, browser: Browser) -> anyhow::Result<String> {
     let name = metadata
         .name
@@ -108,13 +128,15 @@ pub fn generate_manifest(metadata: &ExtensionMetadata, browser: Browser) -> anyh
         version: version.to_string(),
         description: metadata.description.clone(),
         permissions: {
-            let mut permissions = metadata.permissions.clone();
+            let mut permissions = for_browser(&metadata.permissions, metadata, browser);
             if !metadata.menus.is_empty() && !permissions.iter().any(|p| p == "contextMenus") {
                 permissions.push("contextMenus".to_string());
             }
             permissions
         },
+        optional_permissions: for_browser(&metadata.optional_permissions, metadata, browser),
         host_permissions: metadata.host_permissions.clone(),
+        optional_host_permissions: metadata.optional_host_permissions.clone(),
         icons: metadata.icons.iter().cloned().collect(),
         action: if metadata.has_popup
             || metadata.action.is_some()
@@ -283,6 +305,10 @@ mod tests {
             description: Some("A test extension".to_string()),
             permissions: vec!["storage".to_string(), "tabs".to_string()],
             host_permissions: vec![],
+            optional_permissions: vec![],
+            optional_host_permissions: vec![],
+            chrome_only: vec![],
+            firefox_only: vec![],
             background_exports: vec!["__oxichrome_bg_start".to_string()],
             event_handlers: vec![],
             has_popup: true,
@@ -322,6 +348,10 @@ mod tests {
             description: None,
             permissions: vec![],
             host_permissions: vec![],
+            optional_permissions: vec![],
+            optional_host_permissions: vec![],
+            chrome_only: vec![],
+            firefox_only: vec![],
             background_exports: vec![],
             event_handlers: vec![],
             has_popup: false,
@@ -363,6 +393,10 @@ mod tests {
             description: None,
             permissions: vec![],
             host_permissions: vec![],
+            optional_permissions: vec![],
+            optional_host_permissions: vec![],
+            chrome_only: vec![],
+            firefox_only: vec![],
             background_exports: vec![],
             event_handlers: vec![],
             has_popup: false,
@@ -425,6 +459,10 @@ mod tests {
                 "*://developer.mozilla.org/*".to_string(),
                 "*://*.example.org/*".to_string(),
             ],
+            optional_permissions: vec![],
+            optional_host_permissions: vec![],
+            chrome_only: vec![],
+            firefox_only: vec![],
             background_exports: vec![],
             event_handlers: vec![],
             has_popup: false,

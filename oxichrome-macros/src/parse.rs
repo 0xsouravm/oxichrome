@@ -153,8 +153,10 @@ pub struct ExtensionArgs {
     pub version: LitStr,
     pub description: Option<LitStr>,
     pub gecko_id: Option<LitStr>,
-    pub permissions: Vec<LitStr>,
+    pub permissions: Vec<crate::permission::Declared>,
+    pub optional_permissions: Vec<crate::permission::Declared>,
     pub host_permissions: Vec<LitStr>,
+    pub optional_host_permissions: Vec<LitStr>,
     pub icons: Vec<(u32, LitStr)>,
     pub action: Option<ActionArgs>,
 }
@@ -502,8 +504,10 @@ impl Parse for ExtensionArgs {
         let mut version: Option<LitStr> = None;
         let mut description: Option<LitStr> = None;
         let mut gecko_id: Option<LitStr> = None;
-        let mut permissions: Vec<LitStr> = Vec::new();
+        let mut permissions: Vec<crate::permission::Declared> = Vec::new();
+        let mut optional_permissions: Vec<crate::permission::Declared> = Vec::new();
         let mut host_permissions: Vec<LitStr> = Vec::new();
+        let mut optional_host_permissions: Vec<LitStr> = Vec::new();
         let mut icons: Vec<(u32, LitStr)> = Vec::new();
         let mut action: Option<ActionArgs> = None;
 
@@ -527,22 +531,29 @@ impl Parse for ExtensionArgs {
                     gecko_id = Some(id);
                 }
                 "permissions" => {
-                    let content;
-                    syn::bracketed!(content in input);
-                    while !content.is_empty() {
-                        permissions.push(content.parse()?);
-                        if !content.is_empty() {
-                            content.parse::<Token![,]>()?;
-                        }
-                    }
+                    permissions = crate::permission::parse_list(input, "permissions")?;
                 }
-                "host_permissions" => {
+                "optional_permissions" => {
+                    optional_permissions = crate::permission::parse_list(input, "optional_permissions")?;
+                }
+                "host_permissions" | "optional_host_permissions" => {
+                    let list = if key == "host_permissions" { &mut host_permissions } else { &mut optional_host_permissions };
                     let content;
                     syn::bracketed!(content in input);
                     while !content.is_empty() {
+                        if content.peek(Ident) {
+                            let ident: Ident = content.parse()?;
+                            return Err(syn::Error::new(
+                                ident.span(),
+                                format!("`{key}` takes site patterns like \"https://example.com/*\"; put `{ident}` in `{}`", if key == "host_permissions" { "permissions" } else { "optional_permissions" }),
+                            ));
+                        }
                         let pattern: LitStr = content.parse()?;
                         validate_match_pattern(&pattern, "host_permission")?;
-                        host_permissions.push(pattern);
+                        if list.iter().any(|seen| seen.value() == pattern.value()) {
+                            return Err(syn::Error::new(pattern.span(), format!("`{}` is listed twice in `{key}`", pattern.value())));
+                        }
+                        list.push(pattern);
                         if !content.is_empty() {
                             content.parse::<Token![,]>()?;
                         }
@@ -580,13 +591,32 @@ impl Parse for ExtensionArgs {
             )
         })?;
 
+        for optional in &optional_permissions {
+            if permissions.iter().any(|required| required.info.ident == optional.info.ident) {
+                return Err(syn::Error::new(
+                    optional.ident.span(),
+                    format!("`{}` is in `permissions` too; a permission is either granted at install or asked for later, so keep it in one list", optional.ident),
+                ));
+            }
+        }
+        for optional in &optional_host_permissions {
+            if host_permissions.iter().any(|required| required.value() == optional.value()) {
+                return Err(syn::Error::new(
+                    optional.span(),
+                    format!("`{}` is in `host_permissions` too; keep it in one list", optional.value()),
+                ));
+            }
+        }
+
         Ok(ExtensionArgs {
             name,
             version,
             description,
             gecko_id,
             permissions,
+            optional_permissions,
             host_permissions,
+            optional_host_permissions,
             icons,
             action,
         })
@@ -1020,7 +1050,7 @@ mod tests {
         let tokens: proc_macro2::TokenStream = quote::quote! {
             name = "Test Extension",
             version = "1.0.0",
-            permissions = ["storage", "tabs"]
+            permissions = [Storage, Tabs]
         };
         let args: ExtensionArgs = syn::parse2(tokens).unwrap();
         assert_eq!(args.name.value(), "Test Extension");
@@ -1034,7 +1064,7 @@ mod tests {
         let tokens: proc_macro2::TokenStream = quote::quote! {
             name = "Test Extension",
             version = "1.0.0",
-            permissions = ["storage"],
+            permissions = [Storage],
             host_permissions = ["*://developer.mozilla.org/*", "*://*.example.org/*"]
         };
         let args: ExtensionArgs = syn::parse2(tokens).unwrap();
@@ -1476,6 +1506,26 @@ mod tests {
             (quote::quote! { all_frames = true }, "`all_frames` only applies"),
         ] {
             let err = syn::parse2::<ContentScriptArgs>(tokens).err().unwrap().to_string();
+            assert!(err.contains(expected), "{err}");
+        }
+    }
+
+    #[test]
+    fn extension_permission_lists_cross_checked() {
+        let args: ExtensionArgs = syn::parse2(quote::quote! {
+            name = "T", version = "1.0.0", permissions = [Storage], optional_permissions = [History],
+            host_permissions = ["https://a.com/*"], optional_host_permissions = ["https://b.com/*"]
+        }).unwrap();
+        assert_eq!(args.optional_permissions[0].info.name, "history");
+        assert_eq!(args.optional_host_permissions[0].value(), "https://b.com/*");
+        for (tokens, expected) in [
+            (quote::quote! { name = "T", version = "1", permissions = [Tabs], optional_permissions = [Tabs] }, "`Tabs` is in `permissions` too"),
+            (quote::quote! { name = "T", version = "1", host_permissions = ["https://a.com/*"], optional_host_permissions = ["https://a.com/*"] }, "is in `host_permissions` too"),
+            (quote::quote! { name = "T", version = "1", host_permissions = ["https://a.com/*", "https://a.com/*"] }, "listed twice"),
+            (quote::quote! { name = "T", version = "1", host_permissions = [Tabs] }, "put `Tabs` in `permissions`"),
+            (quote::quote! { name = "T", version = "1", optional_host_permissions = [History] }, "put `History` in `optional_permissions`"),
+        ] {
+            let err = syn::parse2::<ExtensionArgs>(tokens).err().unwrap().to_string();
             assert!(err.contains(expected), "{err}");
         }
     }

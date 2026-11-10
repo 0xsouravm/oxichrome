@@ -18,7 +18,7 @@ use oxichrome::prelude::*;
 #[oxichrome::extension(
     name = "My Extension",
     version = "1.0.0",
-    permissions = ["storage"]
+    permissions = [Storage]
 )]
 struct Extension;
 
@@ -120,14 +120,18 @@ Defines extension metadata. Applied to a struct.
     name = "My Extension",
     version = "1.0.0",
     description = "Optional description",
-    permissions = ["storage", "tabs"],
+    permissions = [Storage, Tabs],
+    optional_permissions = [History], // optional, asked for at runtime
     host_permissions = ["https://example.org/*", "*://*.example.com/*"], // optional
+    optional_host_permissions = ["https://*/*"], // optional, asked for at runtime
     icons = { 16 = "icons/16.png", 48 = "icons/48.png", 128 = "icons/128.png" }, // optional
     action = { default_title = "My Extension", default_icon = "icons/32.png", shortcut = "Alt+Shift+M" }, // optional
     gecko_id = "my-extension@example.com" // optional, Firefox only
 )]
 struct MyExtension;
 ```
+
+`permissions` and `optional_permissions` take names from `oxichrome::Permission`, not strings, so a typo or a wrong case is a compile error (with a suggestion), and so is a site pattern like `"<all_urls>"`, which belongs in `host_permissions` (Chrome silently ignores it in `permissions`). Each name is checked against what the two browsers accept, measured in both: a permission a browser only grants at install (Firefox: `Alarms`, `ContextMenus`, `Storage`, `Dns`, `Identity`, `DeclarativeNetRequest` and a few more; Chrome: `Debugger`, `Geolocation`, `Proxy`, `Tts`, `UnlimitedStorage` and a few more) can't be in `optional_permissions`, and one Firefox only grants when asked (`UserScripts`, `TrialMl`) can't be in `permissions`. A permission only one browser has (like `SidePanel` or `TabHide`) is left out of the other browser's manifest, and the build says so. A name can't be in both lists. `ContextMenus` is added for you when you have menu items.
 
 `host_permissions` lists the [match patterns](https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/Match_patterns) your extension can access, and is written to `host_permissions` in the manifest for both Chromium and Firefox. The key is left out of the manifest when the list is empty. Malformed patterns are compile errors.
 
@@ -263,7 +267,7 @@ for frame in frames {
 let one = inspect::SCRIPT.run_in(Target::tab(tab_id).frames(&[click.frame_id.unwrap_or(0)]), "a".into()).await?;
 ```
 
-An on-demand script needs `"scripting"` in `permissions`, and either `host_permissions` for the sites or `"activeTab"`, which allows the current tab right after someone clicks the toolbar button or a menu item, or presses a shortcut. The build fails with a message when either is missing.
+An on-demand script needs `Scripting` in `permissions` (or in `optional_permissions`, asked for first), and either `host_permissions` or `optional_host_permissions` for the sites, or `ActiveTab`, which allows the current tab right after someone clicks the toolbar button or a menu item, or presses a shortcut. The build fails with a message when either is missing.
 
 `run` returns `Err` with the reason when the script can't run: the tab doesn't exist, the extension has no access to that page (the message says which permission to add), or it's a browser page or the extension store, which no extension may touch. When the script panics, `run` returns `Err` with the panic message instead of waiting forever, and the next run in that page starts fresh. Each page keeps the script's state between runs (a `thread_local!` counter keeps counting), and after an update, pages that are already open run the new code. Results can be large (several MB is fine).
 
@@ -375,6 +379,49 @@ commands::open_shortcut_settings().await?;
 ```
 
 `shortcut()` is `None` when nothing is assigned. The text is what the browser shows: Chrome on macOS uses symbols like `⌥⇧D`, Firefox uses `Alt+Shift+D`.
+
+## Permissions
+
+Permissions in `optional_permissions` and sites in `optional_host_permissions` aren't granted at install; you ask for them when the user wants the feature. Browsers only allow asking during a click or key press, and Firefox only while that event is being handled: one `.await` or `spawn_local` later and it refuses. So `request_on_click` gives you the event handler itself. It asks the moment the event fires and passes the answer to your async code:
+
+```rust
+use oxichrome::permissions::{self, PermissionSet};
+use oxichrome::Permission;
+
+#[oxichrome::options_page]
+fn Options() -> impl IntoView {
+    view! {
+        <button on:click=permissions::request_on_click(Permission::History, |granted| async move {
+            oxichrome::log!("history: {granted:?}");
+        })>"Use my history"</button>
+        <button on:click=permissions::request_on_click(
+            PermissionSet::from([Permission::History, Permission::Scripting]).origin("https://example.com/*"),
+            |granted| async move { oxichrome::log!("{granted:?}") },
+        )>"Enable on example.com"</button>
+    }
+}
+```
+
+`granted` is `Ok(true)` when everything was granted (right away if it already was), `Ok(false)` when the user said no, and `Err` with the reason otherwise: a permission that isn't in `optional_permissions` (or that this browser doesn't have), a site not covered by `optional_host_permissions` or `host_permissions`, an empty set, or an event created by code instead of the user. Permissions without a warning (like `Idle` or `Scripting`) are granted without a prompt. Ask from the options page or another extension page: both browsers close the popup when they show the prompt, so a callback started from the popup never runs. The grant still happens and `on_added` fires, so a popup should react to `on_added` (or check `contains` when it opens) instead.
+
+Check, remove and watch permissions anywhere:
+
+```rust
+let has_history: bool = permissions::contains(Permission::History).await?;
+let on_site: bool = permissions::contains(PermissionSet::new().origin("https://example.com/*")).await?;
+let removed: bool = permissions::remove(Permission::History).await?;
+let all: PermissionSet = permissions::get_all().await?;
+
+#[oxichrome::on(permissions::on_added)]
+async fn added(set: PermissionSet) {}
+
+#[oxichrome::on(permissions::on_removed)]
+async fn removed(set: PermissionSet) {}
+```
+
+`contains` is `true` for anything in `permissions` and `false` for a permission this browser doesn't have. `remove` only takes optional ones: removing something from `permissions` or `host_permissions` returns `Err` (Firefox would silently revoke a required site). Grants are kept across restarts, updates and disable/enable in both browsers. Users can also grant or revoke them from the browser's extension settings, which fires the same events.
+
+An on-demand script can rely on optional permissions: put `Scripting` in `optional_permissions` and the sites in `optional_host_permissions`, and ask before running it. Until then, `run` returns `Err` saying what to ask for.
 
 ## Chrome APIs
 

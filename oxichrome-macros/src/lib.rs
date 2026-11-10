@@ -4,13 +4,14 @@ mod codegen;
 mod error;
 mod metadata;
 mod parse;
+mod permission;
 mod shortcut;
 
 /// ```ignore
 /// #[oxichrome::extension(
 ///     name = "My Extension",
 ///     version = "1.0.0",
-///     permissions = ["storage", "tabs"]
+///     permissions = [Storage, Tabs]
 /// )]
 /// struct MyExtension;
 /// ```

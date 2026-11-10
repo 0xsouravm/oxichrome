@@ -10,6 +10,8 @@ pub use oxichrome_core::commands;
 pub use oxichrome_core::context_menus;
 pub use oxichrome_core::event;
 pub use oxichrome_core::notifications;
+pub use oxichrome_core::permissions;
+pub use oxichrome_core::permissions::Permission;
 pub use oxichrome_core::runtime;
 pub use oxichrome_core::scripting;
 pub use oxichrome_core::storage;
@@ -38,6 +40,8 @@ pub mod prelude {
     pub use crate::commands;
     pub use crate::context_menus;
     pub use crate::notifications;
+    pub use crate::permissions;
+    pub use crate::Permission;
     pub use crate::runtime;
     pub use crate::scripting;
     pub use crate::storage;

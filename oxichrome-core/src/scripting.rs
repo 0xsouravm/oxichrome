@@ -91,6 +91,9 @@ fn browser_error(error: JsValue) -> OxichromeError {
         .and_then(|message| message.as_string())
         .or_else(|| error.as_string())
         .unwrap_or_else(|| format!("{error:?}"));
+    if let Some(message) = message.strip_prefix("[oxichrome] ") {
+        return OxichromeError::InvalidArgument(message.to_string());
+    }
     let lower = message.to_ascii_lowercase();
     if lower.contains("cannot be scripted") || lower.contains("cannot access a ") {
         return OxichromeError::InvalidArgument(format!(
@@ -99,7 +102,7 @@ fn browser_error(error: JsValue) -> OxichromeError {
     }
     if lower.contains("permission") || lower.contains("cannot access") {
         return OxichromeError::InvalidArgument(format!(
-            "{message} (the extension needs a `host_permissions` pattern matching this page, or `activeTab` with the call made right after a click on the toolbar button, a menu item or a shortcut)"
+            "{message} (the extension needs a `host_permissions` pattern matching this page, or `ActiveTab` with the call made right after a click on the toolbar button, a menu item or a shortcut)"
         ));
     }
     js_error(message)

@@ -6,7 +6,7 @@ use wasm_bindgen::prelude::*;
     name = "Color Picker",
     version = "0.1.0",
     description = "Pick colors from anywhere on screen using the EyeDropper API",
-    permissions = ["storage"]
+    permissions = [Storage]
 )]
 struct ColorPickerExtension;
 

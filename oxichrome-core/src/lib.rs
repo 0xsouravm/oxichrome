@@ -8,6 +8,7 @@ pub mod event;
 pub mod js_bridge;
 mod json;
 pub mod notifications;
+pub mod permissions;
 pub mod runtime;
 pub mod scripting;
 pub mod storage;

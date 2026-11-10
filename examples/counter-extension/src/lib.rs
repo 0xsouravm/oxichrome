@@ -5,7 +5,7 @@ use oxichrome::prelude::*;
     name = "Counter Extension",
     version = "0.1.0",
     description = "A simple counter stored in chrome.storage.local",
-    permissions = ["storage"]
+    permissions = [Storage]
 )]
 struct CounterExtension;
 

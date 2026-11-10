@@ -10,7 +10,11 @@ pub struct ExtensionMetadata {
     pub version: Option<String>,
     pub description: Option<String>,
     pub permissions: Vec<String>,
+    pub optional_permissions: Vec<String>,
     pub host_permissions: Vec<String>,
+    pub optional_host_permissions: Vec<String>,
+    pub chrome_only: Vec<(String, String)>,
+    pub firefox_only: Vec<(String, String)>,
     pub background_exports: Vec<String>,
     pub event_handlers: Vec<EventHandler>,
     pub has_popup: bool,
@@ -128,7 +132,15 @@ enum Entry {
         description: Option<String>,
         gecko_id: Option<String>,
         permissions: Vec<String>,
+        #[serde(default)]
+        optional_permissions: Vec<String>,
         host_permissions: Vec<String>,
+        #[serde(default)]
+        optional_host_permissions: Vec<String>,
+        #[serde(default)]
+        chrome_only: Vec<(String, String)>,
+        #[serde(default)]
+        firefox_only: Vec<(String, String)>,
         icons: Vec<(u32, String)>,
         action: Option<ActionMetadata>,
     },
@@ -277,10 +289,18 @@ pub fn parse_entries(text: &str) -> anyhow::Result<ExtensionMetadata> {
                 description,
                 gecko_id,
                 permissions,
+                optional_permissions,
                 host_permissions,
+                optional_host_permissions,
+                chrome_only,
+                firefox_only,
                 icons,
                 action,
             } => {
+                metadata.optional_permissions = optional_permissions;
+                metadata.optional_host_permissions = optional_host_permissions;
+                metadata.chrome_only = chrome_only;
+                metadata.firefox_only = firefox_only;
                 extensions.push(name.clone());
                 metadata.name = Some(name);
                 metadata.version = Some(version);
@@ -360,7 +380,7 @@ pub fn parse_entries(text: &str) -> anyhow::Result<ExtensionMetadata> {
         );
     }
     scripts.sort();
-    check_scripts(&scripts, &metadata.permissions, &metadata.host_permissions)?;
+    check_scripts(&scripts, &metadata)?;
     metadata.menus = resolve_menus(menus)?;
     let action_shortcut = metadata
         .action
@@ -381,7 +401,10 @@ pub fn parse_entries(text: &str) -> anyhow::Result<ExtensionMetadata> {
     Ok(metadata)
 }
 
-fn check_scripts(scripts: &[String], permissions: &[String], host_permissions: &[String]) -> anyhow::Result<()> {
+fn check_scripts(scripts: &[String], metadata: &ExtensionMetadata) -> anyhow::Result<()> {
+    let has = |name: &str| {
+        metadata.permissions.iter().chain(&metadata.optional_permissions).any(|permission| permission == name)
+    };
     let Some(first) = scripts.first() else {
         return Ok(());
     };
@@ -390,14 +413,14 @@ fn check_scripts(scripts: &[String], permissions: &[String], host_permissions: &
     } else {
         format!("the on-demand scripts {}", scripts.join(", "))
     };
-    if !permissions.iter().any(|permission| permission == "scripting") {
+    if !has("scripting") {
         bail!(
-            "add \"scripting\" to `permissions` in #[oxichrome::extension]; {listed} can't run without it"
+            "add `Scripting` to `permissions` in #[oxichrome::extension]; {listed} can't run without it"
         );
     }
-    if host_permissions.is_empty() && !permissions.iter().any(|permission| permission == "activeTab") {
+    if metadata.host_permissions.is_empty() && metadata.optional_host_permissions.is_empty() && !has("activeTab") {
         bail!(
-            "{listed} can't reach any page: add the sites to `host_permissions` in #[oxichrome::extension] (like \"https://example.com/*\"), or add \"activeTab\" to `permissions` to run them in the current tab right after a click on the toolbar button, a menu item or a shortcut"
+            "{listed} can't reach any page: add the sites to `host_permissions` in #[oxichrome::extension] (like \"https://example.com/*\"), or add `ActiveTab` to `permissions` to run them in the current tab right after a click on the toolbar button, a menu item or a shortcut"
         );
     }
     Ok(())
@@ -873,11 +896,18 @@ mod tests {
         let one = [script("grab", 3)];
         let two = [script("b", 9), script("a", 4)];
         let err = with("[]", r#"["https://a.com/*"]"#, &one).unwrap_err().to_string();
-        assert!(err.contains(r#"add "scripting" to `permissions`"#) && err.contains("the on-demand script `grab` (src/lib.rs:3:1)"), "{err}");
+        assert!(err.contains("add `Scripting` to `permissions`") && err.contains("the on-demand script `grab` (src/lib.rs:3:1)"), "{err}");
         let err = with(r#"["scripting"]"#, "[]", &two).unwrap_err().to_string();
         assert!(err.contains("the on-demand scripts `a` (src/lib.rs:4:1), `b` (src/lib.rs:9:1) can't reach any page"), "{err}");
         assert!(with(r#"["scripting"]"#, r#"["https://a.com/*"]"#, &one).is_ok());
         assert!(with(r#"["scripting","activeTab"]"#, "[]", &two).is_ok());
         assert!(with("[]", "[]", &[]).is_ok());
+        let optional = |permissions: &str, optional: &str, hosts: &str, optional_hosts: &str| {
+            let ext = format!(r#"{{"kind":"extension","name":"T","version":"1.0.0","description":null,"gecko_id":null,"permissions":{permissions},"optional_permissions":{optional},"host_permissions":{hosts},"optional_host_permissions":{optional_hosts},"icons":[],"action":null}}"#);
+            parse_entries(&[ext, script("a", 1)].join("\n"))
+        };
+        assert!(optional("[]", r#"["scripting"]"#, "[]", r#"["https://a.com/*"]"#).is_ok());
+        assert!(optional("[]", r#"["scripting","activeTab"]"#, "[]", "[]").is_ok());
+        assert!(optional(r#"["scripting"]"#, "[]", "[]", "[]").is_err());
     }
 }

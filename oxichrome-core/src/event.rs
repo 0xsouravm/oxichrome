@@ -86,6 +86,8 @@ pub mod events {
     pub struct NotificationsOnButtonClicked;
     pub struct ContextMenusOnClicked;
     pub struct CommandsOnCommand;
+    pub struct PermissionsOnAdded;
+    pub struct PermissionsOnRemoved;
 }
 
 macro_rules! arity {
@@ -110,6 +112,8 @@ arity! {
     NotificationsOnButtonClicked = 2,
     ContextMenusOnClicked = 2,
     CommandsOnCommand = 2,
+    PermissionsOnAdded = 1,
+    PermissionsOnRemoved = 1,
 }
 
 impl EventArg<events::NotificationsOnClicked, 1> for String {}

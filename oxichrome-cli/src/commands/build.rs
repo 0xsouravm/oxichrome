@@ -94,6 +94,18 @@ pub fn run(release: bool, browser: Browser) -> Result<()> {
     fs::write(dist_dir.join("manifest.json"), &manifest_json)
         .context("failed to write manifest.json")?;
     println!("[oxichrome] Generated manifest.json");
+    let left_out = manifest::left_out_permissions(&metadata, browser);
+    if !left_out.is_empty() {
+        let browser_name = match browser {
+            oxichrome_build::Browser::Chromium => "Chrome",
+            oxichrome_build::Browser::Firefox => "Firefox",
+        };
+        println!(
+            "[oxichrome] Note: {browser_name} doesn't have {}, so this build leaves {} out",
+            left_out.iter().map(|(_, ident)| format!("`{ident}`")).collect::<Vec<_>>().join(", "),
+            if left_out.len() == 1 { "it" } else { "them" }
+        );
+    }
 
     let background_js = shims::generate_background_js(&metadata, &crate_name);
     fs::write(dist_dir.join("background.js"), &background_js)

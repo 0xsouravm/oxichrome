@@ -451,6 +451,10 @@ mod tests {
             description: None,
             permissions: vec![],
             host_permissions: vec![],
+            optional_permissions: vec![],
+            optional_host_permissions: vec![],
+            chrome_only: vec![],
+            firefox_only: vec![],
             background_exports: vec!["__oxichrome_bg_start".to_string()],
             event_handlers: vec![EventHandler {
                 fn_name: "handle_install".to_string(),
@@ -487,6 +491,10 @@ mod tests {
             description: None,
             permissions: vec![],
             host_permissions: vec![],
+            optional_permissions: vec![],
+            optional_host_permissions: vec![],
+            chrome_only: vec![],
+            firefox_only: vec![],
             background_exports: vec![],
             event_handlers: handlers
                 .iter()

@@ -235,7 +235,7 @@ extern "C" {
 #[wasm_bindgen(inline_js = r#"
 function api() {
     if (!globalThis.chrome?.scripting) {
-        throw new Error('chrome.scripting is missing: add "scripting" to `permissions` in #[oxichrome::extension]');
+        throw new Error('[oxichrome] chrome.scripting is missing: add `Scripting` to `permissions` in #[oxichrome::extension], or, when it is in `optional_permissions`, ask for it with `permissions::request_on_click` first');
     }
     return chrome.scripting;
 }
@@ -313,4 +313,65 @@ extern "C" {
 
     #[wasm_bindgen(catch)]
     pub fn remove_css(target: &JsValue, css: &str) -> Result<js_sys::Promise, JsValue>;
+}
+
+#[wasm_bindgen(inline_js = r#"
+function api() {
+    return globalThis.chrome.permissions;
+}
+
+export function permissions_request(set) {
+    return api().request(set);
+}
+
+export function permissions_contains(set) {
+    return api().contains(set);
+}
+
+export function permissions_remove(set) {
+    return api().remove(set);
+}
+
+export function permissions_get_all() {
+    return api().getAll();
+}
+
+export function permissions_declared() {
+    const manifest = globalThis.chrome.runtime.getManifest();
+    return {
+        permissions: manifest.permissions || [],
+        optional: manifest.optional_permissions || [],
+        hosts: manifest.host_permissions || [],
+        optional_hosts: manifest.optional_host_permissions || [],
+    };
+}
+
+export function on_permissions_added(callback) {
+    api().onAdded.addListener(callback);
+}
+
+export function on_permissions_removed(callback) {
+    api().onRemoved.addListener(callback);
+}
+"#)]
+extern "C" {
+    #[wasm_bindgen(catch)]
+    pub fn permissions_request(set: &JsValue) -> Result<js_sys::Promise, JsValue>;
+
+    #[wasm_bindgen(catch)]
+    pub fn permissions_contains(set: &JsValue) -> Result<js_sys::Promise, JsValue>;
+
+    #[wasm_bindgen(catch)]
+    pub fn permissions_remove(set: &JsValue) -> Result<js_sys::Promise, JsValue>;
+
+    #[wasm_bindgen(catch)]
+    pub fn permissions_get_all() -> Result<js_sys::Promise, JsValue>;
+
+    pub fn permissions_declared() -> JsValue;
+
+    #[wasm_bindgen(js_name = on_permissions_added)]
+    pub fn chrome_permissions_on_added_add_listener(callback: &Closure<dyn FnMut(JsValue)>);
+
+    #[wasm_bindgen(js_name = on_permissions_removed)]
+    pub fn chrome_permissions_on_removed_add_listener(callback: &Closure<dyn FnMut(JsValue)>);
 }

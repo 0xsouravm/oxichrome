@@ -72,8 +72,24 @@ pub fn expand(attr: TokenStream, item: TokenStream) -> Result<TokenStream, syn::
         None => quote! { None::<&str> },
     };
 
-    let permissions: Vec<_> = args.permissions.iter().collect();
+    let permissions: Vec<&str> = args.permissions.iter().map(|declared| declared.info.name).collect();
     let host_permissions: Vec<_> = args.host_permissions.iter().collect();
+    let permission_checks = args.permissions.iter().chain(&args.optional_permissions).map(|declared| {
+        let ident = &declared.ident;
+        quote! {
+            #[doc(hidden)]
+            const _: oxichrome::Permission = oxichrome::Permission::#ident;
+        }
+    });
+    let names = |list: &[crate::permission::Declared]| list.iter().map(|declared| declared.info.name).collect::<Vec<_>>();
+    let only = |browser: fn(&crate::permission::Info) -> crate::permission::Support| {
+        args.permissions
+            .iter()
+            .chain(&args.optional_permissions)
+            .filter(|declared| browser(declared.info) == crate::permission::Support::No)
+            .map(|declared| [declared.info.name, declared.info.ident])
+            .collect::<Vec<_>>()
+    };
 
     let struct_name = &item_struct.ident;
 
@@ -115,8 +131,12 @@ pub fn expand(attr: TokenStream, item: TokenStream) -> Result<TokenStream, syn::
         "version": version.value(),
         "description": args.description.as_ref().map(LitStr::value),
         "gecko_id": args.gecko_id.as_ref().map(LitStr::value),
-        "permissions": args.permissions.iter().map(LitStr::value).collect::<Vec<_>>(),
+        "permissions": names(&args.permissions),
+        "optional_permissions": names(&args.optional_permissions),
         "host_permissions": args.host_permissions.iter().map(LitStr::value).collect::<Vec<_>>(),
+        "optional_host_permissions": args.optional_host_permissions.iter().map(LitStr::value).collect::<Vec<_>>(),
+        "chrome_only": only(|info| info.firefox),
+        "firefox_only": only(|info| info.chrome),
         "icons": sizes(&args.icons)?,
         "action": action,
     }));
@@ -127,6 +147,7 @@ pub fn expand(attr: TokenStream, item: TokenStream) -> Result<TokenStream, syn::
         #entry
 
         #(#icon_checks)*
+        #(#permission_checks)*
 
         #[doc(hidden)]
         #[allow(non_upper_case_globals)]

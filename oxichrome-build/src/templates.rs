@@ -46,7 +46,7 @@ pub fn lib_rs(name: &str) -> String {
 #[oxichrome::extension(
     name = "{display_name}",
     version = "0.1.0",
-    permissions = ["storage"]
+    permissions = [Storage]
 )]
 struct Extension;
 
