@@ -1,4 +1,14 @@
+fn oxichrome_requirement() -> String {
+    let version = env!("CARGO_PKG_VERSION");
+    let mut parts = version.split('.');
+    match (parts.next(), parts.next()) {
+        (Some(major), Some(minor)) => format!("{major}.{minor}"),
+        _ => version.to_string(),
+    }
+}
+
 pub fn cargo_toml(name: &str) -> String {
+    let oxichrome = oxichrome_requirement();
     format!(
         r#"[package]
 name = "{name}"
@@ -9,7 +19,7 @@ edition = "2021"
 crate-type = ["cdylib"]
 
 [dependencies]
-oxichrome = {{ version = "0.1" }}
+oxichrome = {{ version = "{oxichrome}" }}
 wasm-bindgen = "0.2"
 serde = {{ version = "1", features = ["derive"] }}
 "#
@@ -59,4 +69,16 @@ pub fn gitignore() -> &'static str {
 *.wasm
 Cargo.lock
 "#
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cargo_toml_depends_on_this_oxichrome_release() {
+        let version = env!("CARGO_PKG_VERSION");
+        let minor = version.rsplit_once('.').unwrap().0;
+        assert!(cargo_toml("x").contains(&format!("oxichrome = {{ version = \"{minor}\" }}")));
+    }
 }

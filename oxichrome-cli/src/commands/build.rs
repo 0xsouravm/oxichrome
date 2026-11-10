@@ -25,10 +25,6 @@ pub fn run(release: bool, browser: Browser) -> Result<()> {
 
     ensure_wasm_target()?;
 
-    let target_dir_for_lock = get_target_dir()?;
-    let workspace_root = target_dir_for_lock.parent().unwrap_or(&crate_dir);
-    ensure_wasm_bindgen_cli(workspace_root, &crate_dir)?;
-
     let profile = if release { "release" } else { "debug" };
     println!("[oxichrome] Running cargo build ({profile})...");
     let mut cargo_args = vec!["build", "--lib", "--target", "wasm32-unknown-unknown"];
@@ -63,8 +59,9 @@ pub fn run(release: bool, browser: Browser) -> Result<()> {
     let wasm_dist_dir = dist_dir.join("wasm");
     fs::create_dir_all(&wasm_dist_dir).context("failed to create dist/wasm directory")?;
 
+    let wasm_bindgen = wasm_bindgen_cli()?;
     println!("[oxichrome] Running wasm-bindgen...");
-    let status = Command::new("wasm-bindgen")
+    let status = Command::new(&wasm_bindgen)
         .args([
             "--target",
             "web",
@@ -177,64 +174,100 @@ fn ensure_wasm_target() -> Result<()> {
     Ok(())
 }
 
-fn ensure_wasm_bindgen_cli(workspace_root: &Path, crate_dir: &Path) -> Result<()> {
-    let desired_version =
-        read_wasm_bindgen_version(workspace_root).or_else(|| read_wasm_bindgen_version(crate_dir));
+fn wasm_bindgen_cli() -> Result<PathBuf> {
+    let output = Command::new("cargo")
+        .args(["metadata", "--format-version=1"])
+        .output()
+        .context("failed to run cargo metadata")?;
+    if !output.status.success() {
+        bail!("cargo metadata failed");
+    }
+    let metadata: serde_json::Value =
+        serde_json::from_slice(&output.stdout).context("failed to parse cargo metadata output")?;
+    let version = wasm_bindgen_version(&metadata)?;
 
-    let output = Command::new("wasm-bindgen").arg("--version").output();
-    if let Ok(output) = output {
-        let version_str = String::from_utf8_lossy(&output.stdout);
-        if let Some(desired) = &desired_version {
-            if version_str.contains(desired) {
-                return Ok(());
-            }
-            println!(
-                "[oxichrome] wasm-bindgen-cli version mismatch (want {desired}). Reinstalling..."
-            );
-        } else {
-            return Ok(());
+    if let Ok(on_path) = which("wasm-bindgen") {
+        if reports_version(&on_path, &version) {
+            return Ok(on_path);
         }
     }
 
-    let mut args = vec!["install", "wasm-bindgen-cli"];
-    let version_flag;
-    if let Some(version) = &desired_version {
-        version_flag = format!("--version={version}");
-        args.push(&version_flag);
+    let root = cache_dir()?.join("wasm-bindgen-cli").join(&version);
+    let binary = root
+        .join("bin")
+        .join(format!("wasm-bindgen{}", std::env::consts::EXE_SUFFIX));
+    if reports_version(&binary, &version) {
+        return Ok(binary);
     }
 
-    println!("[oxichrome] Installing wasm-bindgen-cli...");
+    println!(
+        "[oxichrome] Installing wasm-bindgen-cli {version} into {} (once per version)...",
+        root.display()
+    );
     let status = Command::new("cargo")
-        .args(&args)
+        .args(["install", "wasm-bindgen-cli", "--locked", "--version"])
+        .arg(format!("={version}"))
+        .arg("--root")
+        .arg(&root)
         .status()
-        .context("failed to install wasm-bindgen-cli")?;
-
-    if !status.success() {
-        bail!("failed to install wasm-bindgen-cli");
+        .context("failed to run cargo install")?;
+    if !status.success() || !reports_version(&binary, &version) {
+        bail!("failed to install wasm-bindgen-cli {version}");
     }
-
-    Ok(())
+    Ok(binary)
 }
 
-fn read_wasm_bindgen_version(crate_dir: &Path) -> Option<String> {
-    let lock_path = crate_dir.join("Cargo.lock");
-    let content = fs::read_to_string(lock_path).ok()?;
+fn wasm_bindgen_version(metadata: &serde_json::Value) -> Result<String> {
+    let mut versions: Vec<&str> = metadata["packages"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|package| package["name"] == "wasm-bindgen")
+        .filter_map(|package| package["version"].as_str())
+        .collect();
+    versions.sort_unstable();
+    versions.dedup();
+    match versions.as_slice() {
+        [version] => Ok(version.to_string()),
+        [] => bail!("wasm-bindgen is not a dependency of this crate; add `wasm-bindgen` to [dependencies]"),
+        _ => bail!(
+            "the dependency graph has several wasm-bindgen versions ({}); run `cargo update -p wasm-bindgen` to unify them",
+            versions.join(", ")
+        ),
+    }
+}
 
-    let mut in_wasm_bindgen = false;
-    for line in content.lines() {
-        let trimmed = line.trim();
-        if trimmed == "[[package]]" {
-            in_wasm_bindgen = false;
-        } else if trimmed == r#"name = "wasm-bindgen""# {
-            in_wasm_bindgen = true;
-        } else if in_wasm_bindgen && trimmed.starts_with("version = ") {
-            let version = trimmed
-                .strip_prefix("version = \"")
-                .and_then(|s| s.strip_suffix('"'));
-            return version.map(|s| s.to_string());
+fn reports_version(binary: &Path, version: &str) -> bool {
+    Command::new(binary)
+        .arg("--version")
+        .output()
+        .map(|output| parse_cli_version(&String::from_utf8_lossy(&output.stdout)) == Some(version))
+        .unwrap_or(false)
+}
+
+fn parse_cli_version(output: &str) -> Option<&str> {
+    let mut words = output.split_whitespace();
+    (words.next()? == "wasm-bindgen").then_some(())?;
+    words.next()
+}
+
+fn cache_dir() -> Result<PathBuf> {
+    let env = |name: &str| std::env::var_os(name).filter(|value| !value.is_empty());
+    if let Some(dir) = env("OXICHROME_CACHE_DIR") {
+        return Ok(PathBuf::from(dir));
+    }
+    if cfg!(windows) {
+        if let Some(dir) = env("LOCALAPPDATA") {
+            return Ok(PathBuf::from(dir).join("oxichrome"));
         }
     }
-    None
+    if let Some(dir) = env("XDG_CACHE_HOME") {
+        return Ok(PathBuf::from(dir).join("oxichrome"));
+    }
+    let home = env("HOME")
+        .or_else(|| env("USERPROFILE"))
+        .context("could not find a cache directory; set OXICHROME_CACHE_DIR")?;
+    Ok(PathBuf::from(home).join(".cache").join("oxichrome"))
 }
 
 fn find_lib_rs(crate_dir: &Path) -> Result<PathBuf> {
@@ -350,6 +383,38 @@ mod tests {
             name = "test-crate"
         "#;
         assert_eq!(extract_crate_name(content), Some("test-crate".into()));
+    }
+
+    #[test]
+    fn test_parse_cli_version_is_exact() {
+        assert_eq!(parse_cli_version("wasm-bindgen 0.2.108\n"), Some("0.2.108"));
+        assert_eq!(
+            parse_cli_version("wasm-bindgen 0.2.108 (abc123)"),
+            Some("0.2.108")
+        );
+        assert_ne!(parse_cli_version("wasm-bindgen 0.2.108"), Some("0.2.1"));
+        assert_eq!(parse_cli_version("something 0.2.108"), None);
+        assert_eq!(parse_cli_version(""), None);
+    }
+
+    #[test]
+    fn test_wasm_bindgen_version_from_metadata() {
+        let one = serde_json::json!({ "packages": [
+            { "name": "wasm-bindgen", "version": "0.2.130" },
+            { "name": "wasm-bindgen-futures", "version": "0.4.1" },
+            { "name": "wasm-bindgen", "version": "0.2.130" }
+        ]});
+        assert_eq!(wasm_bindgen_version(&one).unwrap(), "0.2.130");
+        let none = serde_json::json!({ "packages": [{ "name": "serde", "version": "1.0.0" }] });
+        assert!(wasm_bindgen_version(&none).is_err());
+        let two = serde_json::json!({ "packages": [
+            { "name": "wasm-bindgen", "version": "0.2.100" },
+            { "name": "wasm-bindgen", "version": "0.2.130" }
+        ]});
+        assert!(wasm_bindgen_version(&two)
+            .unwrap_err()
+            .to_string()
+            .contains("0.2.100, 0.2.130"));
     }
 
     #[test]

@@ -60,7 +60,7 @@ cargo install cargo-oxichrome
 Requires:
 - Rust (stable)
 - `wasm32-unknown-unknown` target (auto-installed on first build)
-- `wasm-bindgen-cli` (auto-installed with version matching on first build)
+- `wasm-bindgen-cli`: nothing to do. `cargo oxichrome build` uses the `wasm-bindgen` on your `PATH` when its version matches your `Cargo.lock` exactly. Otherwise it installs the matching version once into `~/.cache/oxichrome/wasm-bindgen-cli/<version>` (`%LOCALAPPDATA%\oxichrome` on Windows, or `OXICHROME_CACHE_DIR`), leaving your global install alone
 
 ## Quick start
 

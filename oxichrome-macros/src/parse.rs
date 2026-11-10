@@ -1,105 +1,99 @@
 use syn::parse::{Parse, ParseStream};
 use syn::{Ident, LitBool, LitStr, Token};
 
-/// See <https://developer.chrome.com/docs/extensions/develop/concepts/match-patterns> from <https://developer.chrome.com/docs/extensions/develop/concepts/declare-permissions#host-permissions>
-/// and also <https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/Match_patterns#invalid_or_unmatched_patterns> from <https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/manifest.json/host_permissions>
-fn validate_host_permission_pattern(pattern: &LitStr) -> syn::Result<()> {
+/// See <https://developer.chrome.com/docs/extensions/develop/concepts/match-patterns>
+/// and <https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/Match_patterns>.
+/// Accepts only patterns both Chrome and Firefox load.
+fn validate_match_pattern(pattern: &LitStr, kind: &str) -> syn::Result<()> {
     let val = pattern.value();
+    let fail = |reason: &str| {
+        Err(syn::Error::new(
+            pattern.span(),
+            format!(
+                "invalid {kind} pattern `{val}`: {reason}. See \
+                 https://developer.chrome.com/docs/extensions/develop/concepts/match-patterns"
+            ),
+        ))
+    };
+
     if val == "<all_urls>" {
         return Ok(());
     }
 
-    let scheme_end = if val.starts_with("https://") {
-        8
-    } else if val.starts_with("http://") {
-        7
-    } else if val.starts_with("*://") {
-        4
-    } else if val.starts_with("file:///") {
-        8
-    } else if val.starts_with("ftp://") {
-        6
-    } else {
-        return Err(syn::Error::new(
-            pattern.span(),
-            format!(
-                "invalid host_permission pattern `{val}`: must start with a scheme \
-                 (e.g. `https://`, `*://`, `http://`, `file:///`) or be `<all_urls>` \
-                See https://developer.chrome.com/docs/extensions/develop/concepts/match-patterns \
-                and/or https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/Match_patterns#invalid_or_unmatched_patterns"
-            ),
-        ));
+    let missing_scheme = "must start with a scheme (`https://`, `http://`, `*://`, `file://`, \
+                          `ftp://`) or be `<all_urls>`";
+    let Some((scheme, rest)) = val.split_once("://") else {
+        return fail(missing_scheme);
     };
+    match scheme {
+        "http" | "https" | "*" | "ftp" | "file" => {}
+        "ws" | "wss" => {
+            return fail("`ws://` and `wss://` work only in Firefox; Chrome rejects them")
+        }
+        _ => return fail(missing_scheme),
+    }
 
-    // Check for fragment identifiers (not allowed)
     if val.contains('#') {
-        return Err(syn::Error::new(
-            pattern.span(),
-            format!(
-                "invalid host_permission pattern `{val}`: fragment identifiers (#) are not allowed \
-                 in match patterns"
-            ),
-        ));
+        return fail("fragment identifiers (#) are not allowed");
+    }
+    if val.contains('\\') {
+        return fail("backslashes are not allowed");
     }
 
-    let rest = &val[scheme_end..];
-
-    if rest.starts_with('/') {
-        return Err(syn::Error::new(
-            pattern.span(),
-            format!("invalid host_permission pattern `{val}`: host cannot be empty"),
-        ));
+    let Some(path_start) = rest.find('/') else {
+        return fail(
+            "must include a path starting with '/' (e.g. `https://example.org/`, \
+             `*://*.example.org/*`)",
+        );
+    };
+    if scheme == "file" {
+        return Ok(());
     }
 
-    let path_start = rest.find('/');
-    if path_start.is_none() {
-        return Err(syn::Error::new(
-            pattern.span(),
-            format!(
-                "invalid host_permission pattern `{val}`: must include a path starting with '/' \
-                 (e.g. `https://example.org/`, `*://*.example.org/*`)"
-            ),
-        ));
+    let authority = &rest[..path_start];
+    if authority.is_empty() {
+        return fail("host cannot be empty");
     }
 
-    let host_and_port = &rest[..path_start.unwrap()];
-    let (host, port) = if let Some(colon_pos) = host_and_port.rfind(':') {
-        (
-            &host_and_port[..colon_pos],
-            Some(&host_and_port[colon_pos + 1..]),
-        )
+    let (host, port) = if let Some(inside) = authority.strip_prefix('[') {
+        let Some(end) = inside.find(']') else {
+            return fail("IPv6 address is missing its closing `]`");
+        };
+        let host = &authority[..end + 2];
+        match &inside[end + 1..] {
+            "" => (host, None),
+            tail if tail.starts_with(':') => (host, Some(&tail[1..])),
+            _ => return fail("unexpected text after the IPv6 address"),
+        }
     } else {
-        (host_and_port, None)
+        match authority.split_once(':') {
+            Some((host, port)) => (host, Some(port)),
+            None => (authority, None),
+        }
     };
 
-    if host.contains('*') {
-        // Wildcard must be at the start...
+    if host.contains('*') && host != "*" {
         if !host.starts_with('*') {
-            return Err(syn::Error::new(
-                pattern.span(),
-                format!(
-                    "invalid host_permission pattern `{val}`: wildcard (*) in host must be at the start"
-                ),
-            ));
+            return fail("wildcard (*) in host must be at the start");
         }
-        // ...and must be alone or followed by period mark
-        if host != "*" && !host.starts_with("*.") {
-            return Err(syn::Error::new(
-                pattern.span(),
-                format!(
-                    "invalid host_permission pattern `{val}`: wildcard (*) must be alone or followed by a dot (e.g. `*` or `*.example.org`)"
-                ),
-            ));
+        match host.strip_prefix("*.") {
+            Some(domain) if !domain.is_empty() && !domain.contains('*') => {}
+            _ => {
+                return fail(
+                    "wildcard (*) must be alone or followed by a dot and a domain \
+                     (e.g. `*` or `*.example.org`)",
+                )
+            }
         }
     }
 
-    // Validate port if present (Chrome allows * for port)
-    if let Some(port_str) = port {
-        if port_str != "*" && port_str.parse::<u16>().is_err() {
-            return Err(syn::Error::new(
-                pattern.span(),
-                format!("invalid host_permission pattern `{val}`: invalid port `{port_str}`"),
-            ));
+    if let Some(port) = port {
+        if port == "*" {
+            return fail("a wildcard port works only in Chrome; Firefox rejects it");
+        }
+        let digits = !port.is_empty() && port.bytes().all(|b| b.is_ascii_digit());
+        if !digits || port.parse::<u16>().is_err() {
+            return fail(&format!("invalid port `{port}`"));
         }
     }
 
@@ -205,7 +199,7 @@ impl Parse for ExtensionArgs {
                     syn::bracketed!(content in input);
                     while !content.is_empty() {
                         let pattern: LitStr = content.parse()?;
-                        validate_host_permission_pattern(&pattern)?;
+                        validate_match_pattern(&pattern, "host_permission")?;
                         host_permissions.push(pattern);
                         if !content.is_empty() {
                             content.parse::<Token![,]>()?;
@@ -336,22 +330,7 @@ impl Parse for ContentScriptArgs {
         }
 
         for pattern in &matches {
-            let val = pattern.value();
-            if val != "<all_urls>"
-                && !val.starts_with("http://")
-                && !val.starts_with("https://")
-                && !val.starts_with("*://")
-                && !val.starts_with("file://")
-                && !val.starts_with("ftp://")
-            {
-                return Err(syn::Error::new(
-                    pattern.span(),
-                    format!(
-                        "invalid match pattern `{val}`: must start with a scheme \
-                         (e.g. `https://`, `*://`, `http://`) or be `<all_urls>`"
-                    ),
-                ));
-            }
+            validate_match_pattern(pattern, "match")?;
         }
 
         Ok(ContentScriptArgs {
@@ -440,7 +419,18 @@ mod tests {
             "http://127.0.0.1/*",
             "https://*.google.com/foo*bar",
             "https://*/foo*",
-            "http://*:*/*",
+            "file:///*",
+            "file:///",
+            "file:///C:/*",
+            "file://somehost/path",
+            "file://*/*",
+            "http://127.0.0.1:8080/*",
+            "http://a.com:0/*",
+            "http://a.com:65535/*",
+            "https://[::1]/*",
+            "https://[::1]:8080/*",
+            "https://*/",
+            "https://a.com/p?q=1",
         ];
 
         for pattern in valid_patterns {
@@ -470,7 +460,22 @@ mod tests {
             ("resource://path/", "unsupported scheme"),
             ("https://www.mozilla.org/#section1", "fragment identifier"),
             ("https:///path/", "missing host"),
-            ("file://somehost/path", "invalid"),
+            ("file:/*", "missing slashes"),
+            ("http://*:*/*", "wildcard port"),
+            ("http://127.0.0.1:*/*", "wildcard port"),
+            ("http://a.com:/*", "empty port"),
+            ("http://a.com:65536/*", "port out of range"),
+            ("http://a.com:+80/*", "signed port"),
+            ("https://a.com:80:80/*", "two ports"),
+            ("https://[::1/*", "unclosed IPv6"),
+            ("https://[::1]x/*", "text after IPv6"),
+            ("https://*.*/*", "two wildcards"),
+            ("https://*./*", "wildcard without domain"),
+            ("https://a.com\\x/*", "backslash"),
+            ("ws://example.org/*", "Firefox only"),
+            ("wss://example.org/*", "Firefox only"),
+            ("HTTPS://a.com/*", "uppercase scheme"),
+            ("urn:*", "unsupported scheme"),
         ];
 
         for (pattern, _reason) in invalid_patterns {
@@ -662,6 +667,27 @@ mod tests {
         };
         let err = syn::parse2::<ContentScriptArgs>(tokens).unwrap_err();
         assert!(err.to_string().contains("must start with a scheme"));
+    }
+
+    #[test]
+    fn parse_content_script_args_checks_the_whole_pattern() {
+        for pattern in ["file:///*", "https://[::1]:8080/*", "*://*.example.org/*"] {
+            let tokens = quote::quote! { matches = [#pattern] };
+            assert!(
+                syn::parse2::<ContentScriptArgs>(tokens).is_ok(),
+                "{pattern}"
+            );
+        }
+        for pattern in [
+            "http://*:*/*",
+            "https://mozilla.org",
+            "https://*.*/*",
+            "ws://a.org/*",
+        ] {
+            let tokens = quote::quote! { matches = [#pattern] };
+            let err = syn::parse2::<ContentScriptArgs>(tokens).expect_err(pattern);
+            assert!(err.to_string().contains("invalid match pattern"), "{err}");
+        }
     }
 
     #[test]
