@@ -76,3 +76,34 @@ pub fn content_script(attr: TokenStream, item: TokenStream) -> TokenStream {
         .unwrap_or_else(|e| e.into_compile_error())
         .into()
 }
+
+fn order() -> codegen::menu::Order {
+    let span = proc_macro::Span::call_site();
+    codegen::menu::Order {
+        file: span.file(),
+        line: span.line(),
+        column: span.column(),
+    }
+}
+
+/// ```ignore
+/// #[oxichrome::menu(title = "Search for \"%s\"", contexts = [selection])]
+/// async fn search(click: context_menus::Click) { }
+/// ```
+#[proc_macro_attribute]
+pub fn menu(attr: TokenStream, item: TokenStream) -> TokenStream {
+    codegen::menu::expand_menu(attr.into(), item.into(), order())
+        .unwrap_or_else(|e| e.into_compile_error())
+        .into()
+}
+
+/// ```ignore
+/// #[oxichrome::submenu(title = "Copy as", contexts = [page, link])]
+/// struct CopyAs;
+/// ```
+#[proc_macro_attribute]
+pub fn submenu(attr: TokenStream, item: TokenStream) -> TokenStream {
+    codegen::menu::expand_submenu(attr.into(), item.into(), order())
+        .unwrap_or_else(|e| e.into_compile_error())
+        .into()
+}

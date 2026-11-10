@@ -525,6 +525,216 @@ impl Parse for ContentScriptArgs {
     }
 }
 
+pub const MENU_CONTEXTS: &[&str] = &[
+    "page", "frame", "selection", "link", "editable", "image", "video", "audio", "action",
+];
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum MenuKind {
+    Normal,
+    Checkbox(bool),
+    Radio(bool),
+}
+
+#[derive(Debug)]
+pub struct MenuArgs {
+    pub title: LitStr,
+    pub contexts: Option<Vec<Ident>>,
+    pub kind: MenuKind,
+    pub parent: Option<syn::Path>,
+    pub enabled: Option<bool>,
+    pub visible: Option<bool>,
+    pub document_url_patterns: Vec<LitStr>,
+    pub target_url_patterns: Vec<LitStr>,
+}
+
+fn parse_patterns(input: ParseStream, kind: &str) -> syn::Result<Vec<LitStr>> {
+    let content;
+    syn::bracketed!(content in input);
+    let mut patterns = Vec::new();
+    while !content.is_empty() {
+        let pattern: LitStr = content.parse()?;
+        validate_match_pattern(&pattern, kind)?;
+        patterns.push(pattern);
+        if !content.is_empty() {
+            content.parse::<Token![,]>()?;
+        }
+    }
+    Ok(patterns)
+}
+
+pub fn parse_menu_args(input: ParseStream, submenu: bool) -> syn::Result<MenuArgs> {
+    let attr = if submenu { "submenu" } else { "menu" };
+    let mut title: Option<LitStr> = None;
+    let mut contexts: Option<Vec<Ident>> = None;
+    let mut kind = MenuKind::Normal;
+    let mut kind_key: Option<Ident> = None;
+    let mut parent = None;
+    let mut enabled = None;
+    let mut visible = None;
+    let mut document_url_patterns = Vec::new();
+    let mut target_url_patterns = Vec::new();
+    let mut seen: Vec<String> = Vec::new();
+
+    while !input.is_empty() {
+        let key: Ident = input.call(syn::ext::IdentExt::parse_any)?;
+        let name = key.to_string();
+        if seen.contains(&name) {
+            return Err(syn::Error::new(key.span(), format!("`{name}` is given twice")));
+        }
+        seen.push(name.clone());
+        input.parse::<Token![=]>()?;
+        match name.as_str() {
+            "title" => title = Some(input.parse()?),
+            "contexts" => {
+                let content;
+                let brackets = syn::bracketed!(content in input);
+                let mut list: Vec<Ident> = Vec::new();
+                while !content.is_empty() {
+                    if content.peek(LitStr) {
+                        let lit: LitStr = content.parse()?;
+                        return Err(syn::Error::new(
+                            lit.span(),
+                            format!("write contexts without quotes: `contexts = [{}]`", lit.value()),
+                        ));
+                    }
+                    let context: Ident = content.parse()?;
+                    let text = context.to_string();
+                    if text == "all" {
+                        return Err(syn::Error::new(
+                            context.span(),
+                            "`all` means different things in Chrome and Firefox (Firefox includes the toolbar button); list the contexts you want, such as `contexts = [page, link, selection]`",
+                        ));
+                    }
+                    if !MENU_CONTEXTS.contains(&text.as_str()) {
+                        return Err(syn::Error::new(
+                            context.span(),
+                            format!(
+                                "unknown context `{text}`; expected one of {}. Other contexts work in only one browser",
+                                MENU_CONTEXTS.iter().map(|c| format!("`{c}`")).collect::<Vec<_>>().join(", ")
+                            ),
+                        ));
+                    }
+                    if list.iter().any(|existing| *existing == text) {
+                        return Err(syn::Error::new(
+                            context.span(),
+                            format!("context `{text}` is listed twice"),
+                        ));
+                    }
+                    list.push(context);
+                    if !content.is_empty() {
+                        content.parse::<Token![,]>()?;
+                    }
+                }
+                if list.is_empty() {
+                    return Err(syn::Error::new(
+                        brackets.span.join(),
+                        "list at least one context, or leave `contexts` out to use `[page]`",
+                    ));
+                }
+                contexts = Some(list);
+            }
+            "checkbox" | "radio" if !submenu => {
+                if let Some(other) = &kind_key {
+                    return Err(syn::Error::new(
+                        key.span(),
+                        format!("an item can't be both `{other}` and `{name}`"),
+                    ));
+                }
+                let checked: LitBool = input.parse()?;
+                kind = if name == "checkbox" {
+                    MenuKind::Checkbox(checked.value())
+                } else {
+                    MenuKind::Radio(checked.value())
+                };
+                kind_key = Some(key);
+            }
+            "checkbox" | "radio" => {
+                return Err(syn::Error::new(
+                    key.span(),
+                    format!("a submenu can't be a {name}; put the {name} items inside it"),
+                ))
+            }
+            "parent" => parent = Some(input.parse()?),
+            "enabled" => enabled = Some(input.parse::<LitBool>()?.value()),
+            "visible" => visible = Some(input.parse::<LitBool>()?.value()),
+            "document_url_patterns" => {
+                document_url_patterns = parse_patterns(input, "document_url_patterns")?
+            }
+            "target_url_patterns" => {
+                target_url_patterns = parse_patterns(input, "target_url_patterns")?
+            }
+            "id" => {
+                return Err(syn::Error::new(
+                    key.span(),
+                    format!("the id is the {} name; remove `id`", if submenu { "struct" } else { "function" }),
+                ))
+            }
+            "type" | "checked" => {
+                return Err(syn::Error::new(
+                    key.span(),
+                    "write `checkbox = false` or `radio = false` (the value is whether it starts checked)",
+                ))
+            }
+            other => {
+                let mut expected = vec!["title", "contexts"];
+                if !submenu {
+                    expected.extend(["checkbox", "radio"]);
+                }
+                expected.extend(["parent", "enabled", "visible", "document_url_patterns", "target_url_patterns"]);
+                return Err(syn::Error::new(
+                    key.span(),
+                    format!(
+                        "unknown {attr} argument `{other}`; expected {}",
+                        expected.iter().map(|k| format!("`{k}`")).collect::<Vec<_>>().join(", ")
+                    ),
+                ));
+            }
+        }
+        if !input.is_empty() {
+            input.parse::<Token![,]>()?;
+        }
+    }
+
+    let title = title.ok_or_else(|| {
+        syn::Error::new(proc_macro2::Span::call_site(), "missing required argument `title`")
+    })?;
+    if title.value().trim().is_empty() {
+        return Err(syn::Error::new(title.span(), "the title can't be empty"));
+    }
+    let names: Vec<String> = contexts
+        .iter()
+        .flatten()
+        .map(|context| context.to_string())
+        .collect();
+    if title.value().contains("%s") && names != ["selection"] {
+        return Err(syn::Error::new(
+            title.span(),
+            "`%s` is replaced with the selected text only when `contexts = [selection]`; in any other context browsers show `%s` as is",
+        ));
+    }
+    if !target_url_patterns.is_empty() {
+        let media = ["link", "image", "video", "audio"];
+        if names.is_empty() || names.iter().any(|name| !media.contains(&name.as_str())) {
+            return Err(syn::Error::new(
+                target_url_patterns[0].span(),
+                "`target_url_patterns` only filter links and media; set `contexts` to some of `link`, `image`, `video`, `audio`",
+            ));
+        }
+    }
+
+    Ok(MenuArgs {
+        title,
+        contexts,
+        kind,
+        parent,
+        enabled,
+        visible,
+        document_url_patterns,
+        target_url_patterns,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1011,5 +1221,62 @@ mod tests {
         assert_eq!(args.run_at.unwrap().to_string(), "DocumentStart");
         assert_eq!(args.all_frames, Some(true));
         assert_eq!(args.css.len(), 1);
+    }
+
+    fn menu(tokens: proc_macro2::TokenStream) -> syn::Result<MenuArgs> {
+        syn::parse::Parser::parse2(|input: ParseStream| parse_menu_args(input, false), tokens)
+    }
+
+    fn submenu(tokens: proc_macro2::TokenStream) -> syn::Result<MenuArgs> {
+        syn::parse::Parser::parse2(|input: ParseStream| parse_menu_args(input, true), tokens)
+    }
+
+    fn menu_err(tokens: proc_macro2::TokenStream) -> String {
+        menu(tokens).unwrap_err().to_string()
+    }
+
+    #[test]
+    fn menu_args_are_checked() {
+        let args = menu(quote::quote! { title = "Search %s", contexts = [selection], enabled = false }).unwrap();
+        assert_eq!(args.contexts.unwrap().len(), 1);
+        assert_eq!(args.enabled, Some(false));
+        assert_eq!(menu(quote::quote! { title = "T", checkbox = true }).unwrap().kind, MenuKind::Checkbox(true));
+        assert_eq!(menu(quote::quote! { title = "T", radio = false }).unwrap().kind, MenuKind::Radio(false));
+        assert!(menu(quote::quote! { title = "T", parent = tools::Tools }).unwrap().parent.is_some());
+
+        for (tokens, expected) in [
+            (quote::quote! {}, "missing required argument `title`"),
+            (quote::quote! { title = " " }, "can't be empty"),
+            (quote::quote! { title = "Search %s" }, "contexts = [selection]"),
+            (quote::quote! { title = "Search %s", contexts = [selection, link] }, "contexts = [selection]"),
+            (quote::quote! { title = "T", contexts = [all] }, "`all` means different things"),
+            (quote::quote! { title = "T", contexts = [tab] }, "unknown context `tab`"),
+            (quote::quote! { title = "T", contexts = [bookmark] }, "only one browser"),
+            (quote::quote! { title = "T", contexts = ["page"] }, "without quotes"),
+            (quote::quote! { title = "T", contexts = [page, page] }, "listed twice"),
+            (quote::quote! { title = "T", contexts = [] }, "at least one context"),
+            (quote::quote! { title = "T", checkbox = true, radio = true }, "both `checkbox` and `radio`"),
+            (quote::quote! { title = "T", title = "U" }, "given twice"),
+            (quote::quote! { title = "T", id = "x" }, "the id is the function name"),
+            (quote::quote! { title = "T", type = "checkbox" }, "checkbox = false"),
+            (quote::quote! { title = "T", checked = true }, "checkbox = false"),
+            (quote::quote! { title = "T", icons = {} }, "unknown menu argument `icons`"),
+            (quote::quote! { title = "T", document_url_patterns = ["nope"] }, "invalid document_url_patterns pattern"),
+            (quote::quote! { title = "T", target_url_patterns = ["https://a.org/*"] }, "only filter links and media"),
+            (quote::quote! { title = "T", contexts = [page, link], target_url_patterns = ["https://a.org/*"] }, "only filter links and media"),
+        ] {
+            let err = menu_err(tokens.clone());
+            assert!(err.contains(expected), "{tokens}: {err}");
+        }
+        assert!(menu(quote::quote! { title = "T", contexts = [link, image], target_url_patterns = ["https://a.org/*"] }).is_ok());
+    }
+
+    #[test]
+    fn submenus_take_no_item_kind() {
+        assert!(submenu(quote::quote! { title = "Tools", contexts = [page, link] }).is_ok());
+        let err = submenu(quote::quote! { title = "Tools", checkbox = true }).unwrap_err().to_string();
+        assert!(err.contains("a submenu can't be a checkbox"), "{err}");
+        let err = submenu(quote::quote! { title = "Tools", id = "x" }).unwrap_err().to_string();
+        assert!(err.contains("the struct name"), "{err}");
     }
 }

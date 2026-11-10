@@ -10,6 +10,13 @@ pub fn expand(attr: TokenStream, item: TokenStream) -> Result<TokenStream, syn::
     let args: EventArgs = syn::parse2(attr)?;
     let func: ItemFn = syn::parse2(item)?;
 
+    if args.namespace == "context_menus" {
+        return Err(syn::Error::new_spanned(
+            &args.namespace,
+            "context menu clicks go to each item's own handler: put `#[oxichrome::menu(title = \"...\")]` on an async fn instead",
+        ));
+    }
+
     if func.sig.asyncness.is_none() {
         return Err(syn::Error::new_spanned(
             &func.sig.fn_token,

@@ -97,7 +97,13 @@ pub fn generate_manifest(metadata: &ExtensionMetadata, browser: Browser) -> anyh
         name: name.to_string(),
         version: version.to_string(),
         description: metadata.description.clone(),
-        permissions: metadata.permissions.clone(),
+        permissions: {
+            let mut permissions = metadata.permissions.clone();
+            if !metadata.menus.is_empty() && !permissions.iter().any(|p| p == "contextMenus") {
+                permissions.push("contextMenus".to_string());
+            }
+            permissions
+        },
         host_permissions: metadata.host_permissions.clone(),
         icons: metadata.icons.iter().cloned().collect(),
         action: if metadata.has_popup
@@ -106,6 +112,10 @@ pub fn generate_manifest(metadata: &ExtensionMetadata, browser: Browser) -> anyh
                 .event_handlers
                 .iter()
                 .any(|handler| handler.namespace == "action")
+            || metadata
+                .menus
+                .iter()
+                .any(|item| item.contexts.iter().any(|context| context == "action"))
         {
             let configured = metadata.action.clone().unwrap_or_default();
             Some(Action {
@@ -246,6 +256,7 @@ mod tests {
             gecko_id: None,
             icons: vec![],
             action: None,
+            menus: vec![],
         }
     }
 
@@ -289,6 +300,7 @@ mod tests {
             gecko_id: None,
             icons: vec![],
             action: None,
+            menus: vec![],
         };
         let json = generate_manifest(&metadata, Browser::Chromium).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
@@ -327,6 +339,7 @@ mod tests {
             gecko_id: None,
             icons: vec![],
             action: None,
+            menus: vec![],
         };
         let json = generate_manifest(&metadata, Browser::Chromium).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
@@ -365,6 +378,7 @@ mod tests {
             gecko_id: None,
             icons: vec![],
             action: None,
+            menus: vec![],
             permissions: vec!["storage".to_string()],
             host_permissions: vec![
                 "*://developer.mozilla.org/*".to_string(),
@@ -430,5 +444,35 @@ mod tests {
         let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
 
         assert!(parsed.get("action").is_none());
+    }
+
+    #[test]
+    fn test_menus_add_their_permission_and_toolbar_button() {
+        let mut metadata = test_metadata();
+        metadata.has_popup = false;
+        metadata.menus = vec![crate::metadata::MenuItem {
+            id: "a".to_string(),
+            handler: Some("a".to_string()),
+            item_type: "normal".to_string(),
+            title: "T & a".to_string(),
+            contexts: vec!["page".to_string()],
+            checked: None,
+            parent: None,
+            enabled: None,
+            visible: None,
+            document_url_patterns: vec![],
+            target_url_patterns: vec![],
+        }];
+        let parsed: serde_json::Value =
+            serde_json::from_str(&generate_manifest(&metadata, Browser::Firefox).unwrap()).unwrap();
+        assert_eq!(parsed["permissions"], serde_json::json!(["storage", "tabs", "contextMenus"]));
+        assert!(parsed.get("action").is_none());
+
+        metadata.permissions.push("contextMenus".to_string());
+        metadata.menus[0].contexts = vec!["page".to_string(), "action".to_string()];
+        let parsed: serde_json::Value =
+            serde_json::from_str(&generate_manifest(&metadata, Browser::Chromium).unwrap()).unwrap();
+        assert_eq!(parsed["permissions"], serde_json::json!(["storage", "tabs", "contextMenus"]));
+        assert_eq!(parsed["action"], serde_json::json!({}));
     }
 }

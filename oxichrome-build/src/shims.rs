@@ -46,6 +46,121 @@ async function notificationClosedArgs(id, byUser) {
 }
 "#;
 
+fn menu_items_json(metadata: &ExtensionMetadata) -> serde_json::Value {
+    let items = metadata
+        .menus
+        .iter()
+        .map(|item| {
+            let mut object = serde_json::Map::new();
+            object.insert("id".into(), item.id.clone().into());
+            object.insert("title".into(), item.title.clone().into());
+            object.insert("contexts".into(), item.contexts.clone().into());
+            if item.item_type == "checkbox" || item.item_type == "radio" {
+                object.insert("type".into(), item.item_type.clone().into());
+            }
+            if let Some(checked) = item.checked {
+                object.insert("checked".into(), checked.into());
+            }
+            if let Some(parent) = &item.parent {
+                object.insert("parentId".into(), parent.clone().into());
+            }
+            if let Some(enabled) = item.enabled {
+                object.insert("enabled".into(), enabled.into());
+            }
+            if let Some(visible) = item.visible {
+                object.insert("visible".into(), visible.into());
+            }
+            if !item.document_url_patterns.is_empty() {
+                object.insert("documentUrlPatterns".into(), item.document_url_patterns.clone().into());
+            }
+            if !item.target_url_patterns.is_empty() {
+                object.insert("targetUrlPatterns".into(), item.target_url_patterns.clone().into());
+            }
+            serde_json::Value::Object(object)
+        })
+        .collect();
+    serde_json::Value::Array(items)
+}
+
+fn fnv1a(text: &str) -> u64 {
+    text.bytes().fold(0xcbf2_9ce4_8422_2325, |hash, byte| {
+        (hash ^ u64::from(byte)).wrapping_mul(0x0100_0000_01b3)
+    })
+}
+
+fn generate_menus(metadata: &ExtensionMetadata) -> String {
+    if metadata.menus.is_empty() {
+        return String::new();
+    }
+    let items = menu_items_json(metadata).to_string();
+    let marker = format!("__oxichrome_menus_{:016x}", fnv1a(&items));
+    let handlers = metadata
+        .menus
+        .iter()
+        .filter_map(|item| item.handler.as_ref())
+        .map(|handler| format!("    {handler}: __oxichrome_menu_{handler},"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    format!(
+        r#"const menuItems = {items};
+const menuMarker = '{marker}';
+const menuHandlers = {{
+{handlers}
+}};
+
+function menuExists(id) {{
+    return new Promise((resolve) => {{
+        try {{
+            chrome.contextMenus.update(id, {{}}, () => resolve(!chrome.runtime.lastError));
+        }} catch (error) {{
+            resolve(false);
+        }}
+    }});
+}}
+
+function createMenu(item) {{
+    const properties = {{ ...item, title: item.title.replaceAll('&', '&&') }};
+    return new Promise((resolve, reject) => {{
+        chrome.contextMenus.create(properties, () => {{
+            const error = chrome.runtime.lastError;
+            if (error) {{
+                reject(new Error(`[oxichrome] couldn't create context menu item ${{item.id}}: ${{error.message}}`));
+            }} else {{
+                resolve();
+            }}
+        }});
+    }});
+}}
+
+async function ensureMenus() {{
+    if (await menuExists(menuMarker)) {{
+        return;
+    }}
+    await chrome.contextMenus.removeAll();
+    for (const item of menuItems) {{
+        await createMenu(item);
+    }}
+    await createMenu({{ id: menuMarker, title: 'oxichrome', contexts: ['page'], visible: false, enabled: false }});
+}}
+
+const menusReady = ensureMenus().catch((error) => console.error(error));
+
+chrome.contextMenus.onClicked.addListener((info, tab) => {{
+    const handler = menuHandlers[info.menuItemId];
+    if (!handler) {{
+        return;
+    }}
+    const click = {{
+        ...info,
+        tabId: tab && tab.id >= 0 ? tab.id : undefined,
+        windowId: tab && tab.windowId >= 0 ? tab.windowId : undefined,
+    }};
+    dispatch(() => handler(click));
+}});
+"#
+    )
+}
+
 fn generate_listeners(metadata: &ExtensionMetadata) -> String {
     let mut events: Vec<(String, Vec<String>)> = Vec::new();
     for handler in &metadata.event_handlers {
@@ -143,6 +258,11 @@ pub fn generate_background_js(metadata: &ExtensionMetadata, crate_name: &str) ->
     for handler in &metadata.event_handlers {
         exports.push(format!("__oxichrome_on_{}", handler.fn_name));
     }
+    for item in &metadata.menus {
+        if let Some(handler) = &item.handler {
+            exports.push(format!("__oxichrome_menu_{handler}"));
+        }
+    }
 
     let imports = if exports.is_empty() {
         String::new()
@@ -150,10 +270,17 @@ pub fn generate_background_js(metadata: &ExtensionMetadata, crate_name: &str) ->
         format!(", {{ {} }}", exports.join(", "))
     };
 
-    let mut listeners = generate_listeners(metadata);
+    let mut listeners = generate_menus(metadata);
+    listeners.push_str(&generate_listeners(metadata));
     if !metadata.background_functions.is_empty() {
         listeners.push_str("chrome.runtime.onStartup.addListener(() => {});\n");
     }
+
+    let menus_ready = if metadata.menus.is_empty() {
+        ""
+    } else {
+        "        await menusReady;\n"
+    };
 
     let mut init_calls = String::new();
     for bg in &metadata.background_functions {
@@ -187,7 +314,7 @@ function dispatch(run) {{
 async function start() {{
     try {{
         await init();
-{init_calls}        ready = true;
+{menus_ready}{init_calls}        ready = true;
         pending.splice(0).forEach((run) => run());
         console.log('[oxichrome] Background service worker initialized.');
     }} catch (e) {{
@@ -313,6 +440,7 @@ mod tests {
             gecko_id: None,
             icons: vec![],
             action: None,
+            menus: vec![],
         };
 
         let js = generate_background_js(&metadata, "counter-extension");
@@ -349,6 +477,7 @@ mod tests {
             gecko_id: None,
             icons: vec![],
             action: None,
+            menus: vec![],
         }
     }
 
@@ -505,5 +634,62 @@ mod tests {
         assert!(js.contains("Content script \"inject\" initialized."));
         // Must NOT start with a static import statement
         assert!(!js.starts_with("import"));
+    }
+
+    fn metadata_with_menus() -> ExtensionMetadata {
+        let mut metadata = metadata_with_handlers(&[]);
+        metadata.menus = vec![
+            crate::metadata::MenuItem {
+            id: "Tools".to_string(),
+            handler: None,
+            item_type: "submenu".to_string(),
+            title: "T & Tools".to_string(),
+            contexts: vec!["page".to_string()],
+            checked: None,
+            parent: None,
+            enabled: None,
+            visible: None,
+            document_url_patterns: vec![],
+            target_url_patterns: vec![],
+        },
+            crate::metadata::MenuItem {
+            id: "dark".to_string(),
+            handler: Some("dark".to_string()),
+            item_type: "checkbox".to_string(),
+            title: "T & dark".to_string(),
+            contexts: vec!["page".to_string()],
+            checked: Some(true),
+            parent: Some("Tools".to_string()),
+            enabled: None,
+            visible: None,
+            document_url_patterns: vec![],
+            target_url_patterns: vec![],
+        },
+        ];
+        metadata
+    }
+
+    #[test]
+    fn test_menus_are_created_once_per_definition_and_routed_by_id() {
+        let js = generate_background_js(&metadata_with_menus(), "ext");
+        assert!(js.contains("import init, { __oxichrome_menu_dark } from './wasm/ext.js';"), "{js}");
+        assert!(js.contains(r#"const menuItems = [{"contexts":["page"],"id":"Tools","title":"T & Tools"},{"checked":true,"contexts":["page"],"id":"dark","parentId":"Tools","title":"T & dark","type":"checkbox"}];"#), "{js}");
+        assert!(js.contains("    dark: __oxichrome_menu_dark,"), "{js}");
+        assert!(js.contains("const menuMarker = '__oxichrome_menus_"), "{js}");
+        assert!(js.contains("await menusReady;"), "{js}");
+        assert!(js.contains("replaceAll('&', '&&')"), "{js}");
+
+        let mut changed = metadata_with_menus();
+        changed.menus[1].title = "Other".to_string();
+        let marker = |js: &str| js.split("const menuMarker = '").nth(1).unwrap().split('\'').next().unwrap().to_string();
+        assert_ne!(marker(&js), marker(&generate_background_js(&changed, "ext")));
+        assert_eq!(marker(&js), marker(&generate_background_js(&metadata_with_menus(), "ext")));
+    }
+
+    #[test]
+    fn test_no_menus_means_no_menu_code() {
+        let js = generate_background_js(&metadata_with_handlers(&[]), "ext");
+        assert!(!js.contains("contextMenus"), "{js}");
+        assert!(!js.contains("menusReady"), "{js}");
     }
 }

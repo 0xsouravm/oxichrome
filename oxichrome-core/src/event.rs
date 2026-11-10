@@ -5,7 +5,7 @@ use crate::error::{OxichromeError, Result};
 #[diagnostic::on_unimplemented(
     message = "`{Self}` can't be an event handler argument",
     label = "unsupported argument type",
-    note = "use `JsValue`, `String`, `bool`, `u32`, an `Option` of those, or a type oxichrome provides for this event such as `alarms::Alarm`"
+    note = "use `JsValue`, `String`, `bool`, `u32`, an `Option` of those, or a type oxichrome provides for this event such as `alarms::Alarm` or `context_menus::Click`"
 )]
 pub trait FromEventArg: Sized {
     fn from_event_arg(value: JsValue) -> Result<Self>;
@@ -80,6 +80,7 @@ pub mod events {
     pub struct NotificationsOnClicked;
     pub struct NotificationsOnClosed;
     pub struct NotificationsOnButtonClicked;
+    pub struct ContextMenusOnClicked;
 }
 
 impl EventArg<events::NotificationsOnClicked, 1> for String {}

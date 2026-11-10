@@ -42,7 +42,7 @@ cargo oxichrome build --target firefox # Firefox
 
 ## What it does
 
-- Five proc macros (`#[extension]`, `#[background]`, `#[on]`, `#[popup]`, `#[options_page]`) transform your Rust into wasm-bindgen exports
+- Proc macros (`#[extension]`, `#[background]`, `#[on]`, `#[popup]`, `#[options_page]`, `#[content_script]`, `#[menu]`, `#[submenu]`) transform your Rust into wasm-bindgen exports
 - Typed bindings to `chrome.storage`, `chrome.tabs`, `chrome.runtime`
 - Leptos for reactive popup and options page UI
 - `cargo oxichrome build` handles everything: compilation, wasm-bindgen, manifest generation, JS/HTML shim generation, static asset copying, optional wasm-opt
@@ -207,6 +207,62 @@ fn Options() -> impl IntoView {
     view! { <h1>"Settings"</h1> }
 }
 ```
+
+### `#[oxichrome::menu(...)]` and `#[oxichrome::submenu(...)]`
+
+Adds an item to the right-click menu. The async function runs when someone clicks it.
+
+```rust
+use oxichrome::context_menus::Click;
+
+#[oxichrome::menu(title = "Search for \"%s\"", contexts = [selection])]
+async fn search(click: Click) {
+    oxichrome::log!("{:?}", click.selection_text);
+}
+
+#[oxichrome::menu(title = "Dark mode", checkbox = false)]
+async fn dark_mode(click: Click) {
+    oxichrome::log!("now {:?}", click.checked);
+}
+
+#[oxichrome::submenu(title = "Copy as", contexts = [page, link])]
+struct CopyAs;
+
+#[oxichrome::menu(title = "Markdown", parent = CopyAs)]
+async fn as_markdown(click: Click) {
+    oxichrome::log!("{:?}", click.page_url);
+}
+
+#[oxichrome::menu(title = "Plain link", parent = CopyAs, contexts = [link])]
+async fn as_link() {}
+```
+
+| Argument | |
+|---|---|
+| `title` | Required. `%s` becomes the selected text, so it's only allowed with `contexts = [selection]`. `&` shows as written in both browsers. |
+| `contexts` | Where the item shows: `page`, `frame`, `selection`, `link`, `editable`, `image`, `video`, `audio`, `action` (the toolbar button's menu). Defaults to `[page]`, or to the parent's contexts. `all` and browser-specific contexts are compile errors, because the two browsers disagree on them. |
+| `checkbox = bool` / `radio = bool` | Makes a checkbox or radio item; the value is whether it starts checked. Radio items next to each other under the same parent form one group. |
+| `parent` | A `#[submenu]` struct. Its contexts must include the item's, or it's a compile error, since an item only shows where its submenu does. |
+| `enabled`, `visible` | Starting state, `true` when left out. |
+| `document_url_patterns` | Only show on pages matching these [match patterns](https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/Match_patterns). |
+| `target_url_patterns` | Only show for links or media whose URL matches; needs `contexts` of `link`, `image`, `video` or `audio`. |
+
+The handler takes nothing or one `context_menus::Click`: `page_url`, `frame_url`, `frame_id`, `link_url`, `src_url`, `media_type`, `selection_text`, `editable`, `checked`, `was_checked`, `tab_id` and `window_id`, each filled in when the browser reports it. Fields only one browser sends are left out.
+
+The item's id is its function or struct name. Change an item while the extension runs through its `ITEM`, which only has the calls that fit its kind:
+
+```rust
+search::ITEM.set_title("Look up \"%s\"").await?;
+dark_mode::ITEM.set_checked(true).await?;
+as_markdown::ITEM.set_enabled(false).await?;
+CopyAs::ITEM.set_visible(false).await?;
+```
+
+`set_checked` exists only on checkbox items and `select` only on radio items. Using one on another kind doesn't compile.
+
+Items appear in the order they're written; items in different files are ordered by file path. The build adds the `contextMenus` permission, and adds the toolbar button when an item uses the `action` context. A submenu with no items, two items with the same name, submenus inside each other, or more than 6 top-level `action` items (the most browsers show) fail the build with a message naming them.
+
+oxichrome creates the menus when the background starts and recreates them only when their definition changed, so checkbox state and anything you set through `ITEM` survive the service worker stopping. Chrome clears menus when the extension is disabled and enabled again; oxichrome puts them back as declared.
 
 ## Chrome APIs
 

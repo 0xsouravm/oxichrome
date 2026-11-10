@@ -210,3 +210,12 @@ macro_rules! log {
 pub fn __log_impl(msg: &str) {
     web_sys::console::log_1(&wasm_bindgen::JsValue::from_str(msg));
 }
+
+#[wasm_bindgen]
+extern "C" {
+    #[wasm_bindgen(catch, js_namespace = ["chrome", "contextMenus"], js_name = update)]
+    pub fn chrome_context_menus_update(
+        id: &str,
+        properties: &JsValue,
+    ) -> Result<js_sys::Promise, JsValue>;
+}

@@ -18,6 +18,40 @@ pub struct ExtensionMetadata {
     pub gecko_id: Option<String>,
     pub icons: Vec<(u32, String)>,
     pub action: Option<ActionMetadata>,
+    pub menus: Vec<MenuItem>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct MenuItem {
+    pub id: String,
+    pub handler: Option<String>,
+    pub item_type: String,
+    pub title: String,
+    pub contexts: Vec<String>,
+    pub checked: Option<bool>,
+    pub parent: Option<String>,
+    pub enabled: Option<bool>,
+    pub visible: Option<bool>,
+    pub document_url_patterns: Vec<String>,
+    pub target_url_patterns: Vec<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct MenuEntry {
+    id: String,
+    handler: Option<String>,
+    item_type: String,
+    title: String,
+    contexts: Option<Vec<String>>,
+    checked: Option<bool>,
+    parent: Option<String>,
+    enabled: Option<bool>,
+    visible: Option<bool>,
+    document_url_patterns: Vec<String>,
+    target_url_patterns: Vec<String>,
+    file: String,
+    line: usize,
+    column: usize,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]
@@ -84,6 +118,7 @@ enum Entry {
         all_frames: Option<bool>,
         css: Vec<String>,
     },
+    Menu(MenuEntry),
 }
 
 fn read_leb128(bytes: &[u8], pos: &mut usize) -> anyhow::Result<usize> {
@@ -177,6 +212,7 @@ pub fn parse_entries(text: &str) -> anyhow::Result<ExtensionMetadata> {
     let mut extensions = Vec::new();
     let mut popups = Vec::new();
     let mut options_pages = Vec::new();
+    let mut menus = Vec::new();
     for line in text.lines().filter(|line| !line.trim().is_empty()) {
         let entry: Entry = serde_json::from_str(line).with_context(|| {
             format!(
@@ -229,6 +265,7 @@ pub fn parse_entries(text: &str) -> anyhow::Result<ExtensionMetadata> {
                 all_frames,
                 css,
             }),
+            Entry::Menu(menu) => menus.push(menu),
         }
     }
 
@@ -260,6 +297,7 @@ pub fn parse_entries(text: &str) -> anyhow::Result<ExtensionMetadata> {
             options_pages.join(", ")
         );
     }
+    metadata.menus = resolve_menus(menus)?;
     metadata.has_popup = !popups.is_empty();
     metadata.has_options_page = !options_pages.is_empty();
 
@@ -272,6 +310,113 @@ pub fn parse_entries(text: &str) -> anyhow::Result<ExtensionMetadata> {
         .sort_by(|a, b| a.fn_name.cmp(&b.fn_name));
     Ok(metadata)
 }
+
+fn resolve_menus(mut entries: Vec<MenuEntry>) -> anyhow::Result<Vec<MenuItem>> {
+    entries.sort_by(|a, b| (&a.file, a.line, a.column).cmp(&(&b.file, b.line, b.column)));
+
+    let mut ids: Vec<&str> = entries.iter().map(|entry| entry.id.as_str()).collect();
+    ids.sort();
+    if let Some(pair) = ids.windows(2).find(|pair| pair[0] == pair[1]) {
+        let places: Vec<String> = entries
+            .iter()
+            .filter(|entry| entry.id == pair[0])
+            .map(|entry| format!("{}:{}", entry.file, entry.line))
+            .collect();
+        bail!(
+            "two context menu items are named `{}` ({}); menu items need different names because the name is their id",
+            pair[0],
+            places.join(", ")
+        );
+    }
+
+    let find = |id: &str| entries.iter().find(|entry| entry.id == id);
+    for entry in &entries {
+        let mut seen = vec![entry.id.as_str()];
+        let mut current = entry;
+        while let Some(parent) = &current.parent {
+            let Some(next) = find(parent) else {
+                bail!(
+                    "context menu item `{}` ({}:{}) has parent `{parent}`, which is not a `#[oxichrome::submenu]` in this crate",
+                    current.id, current.file, current.line
+                );
+            };
+            if next.item_type != "submenu" {
+                bail!(
+                    "context menu item `{}` ({}:{}) has parent `{parent}`, which is not a `#[oxichrome::submenu]`",
+                    current.id, current.file, current.line
+                );
+            }
+            if seen.contains(&next.id.as_str()) {
+                bail!(
+                    "context menu submenus `{}` contain each other; a submenu can't be inside itself",
+                    seen.join("` -> `")
+                );
+            }
+            seen.push(&next.id);
+            current = next;
+        }
+    }
+    for entry in entries.iter().filter(|entry| entry.item_type == "submenu") {
+        if !entries
+            .iter()
+            .any(|child| child.parent.as_deref() == Some(entry.id.as_str()))
+        {
+            bail!(
+                "submenu `{}` ({}:{}) has no items; add items with `parent = {}` or remove it",
+                entry.id, entry.file, entry.line, entry.id
+            );
+        }
+    }
+
+    fn contexts_of(entries: &[MenuEntry], entry: &MenuEntry) -> Vec<String> {
+        match (&entry.contexts, &entry.parent) {
+            (Some(contexts), _) => contexts.clone(),
+            (None, Some(parent)) => {
+                let parent = entries.iter().find(|other| other.id == *parent).unwrap();
+                contexts_of(entries, parent)
+            }
+            (None, None) => vec!["page".to_string()],
+        }
+    }
+
+    let top_level_action: Vec<&str> = entries
+        .iter()
+        .filter(|entry| entry.parent.is_none())
+        .filter(|entry| contexts_of(&entries, entry).iter().any(|context| context == "action"))
+        .map(|entry| entry.id.as_str())
+        .collect();
+    if top_level_action.len() > ACTION_MENU_TOP_LEVEL_LIMIT {
+        bail!(
+            "{} top-level context menu items use the `action` context ({}); browsers show at most {ACTION_MENU_TOP_LEVEL_LIMIT} on the toolbar button, so group some into a submenu",
+            top_level_action.len(),
+            top_level_action.join(", ")
+        );
+    }
+
+    let mut ordered = Vec::new();
+    fn visit(entries: &[MenuEntry], parent: Option<&str>, ordered: &mut Vec<MenuItem>) {
+        for entry in entries.iter().filter(|entry| entry.parent.as_deref() == parent) {
+            ordered.push(MenuItem {
+                id: entry.id.clone(),
+                handler: entry.handler.clone(),
+                item_type: entry.item_type.clone(),
+                title: entry.title.clone(),
+                contexts: contexts_of(entries, entry),
+                checked: entry.checked,
+                parent: entry.parent.clone(),
+                enabled: entry.enabled,
+                visible: entry.visible,
+                document_url_patterns: entry.document_url_patterns.clone(),
+                target_url_patterns: entry.target_url_patterns.clone(),
+            });
+            visit(entries, Some(&entry.id), ordered);
+        }
+    }
+    visit(&entries, None, &mut ordered);
+    Ok(ordered)
+}
+
+pub const ACTION_MENU_TOP_LEVEL_LIMIT: usize = 6;
 
 #[cfg(test)]
 mod tests {
@@ -411,5 +556,59 @@ mod tests {
             parse_entries(single).unwrap().action.unwrap().default_icon,
             Some(ActionIcon::Single("a.png".to_string()))
         );
+    }
+
+    fn menu(id: &str, extra: &str, line: usize) -> String {
+        format!(
+            r#"{{"kind":"menu","id":"{id}","handler":"{id}","item_type":"normal","title":"T","contexts":null,"checked":null,"parent":null,"enabled":null,"visible":null,"document_url_patterns":[],"target_url_patterns":[],"file":"src/lib.rs","line":{line},"column":1{extra}}}"#
+        )
+    }
+
+    fn with(base: &str, field: &str, value: &str) -> String {
+        let marker = format!("\"{field}\":");
+        let start = base.find(&marker).unwrap() + marker.len();
+        let end = start + base[start..].find(|c| c == ',' || c == '}').unwrap();
+        format!("{}{value}{}", &base[..start], &base[end..])
+    }
+
+    fn menus(lines: &[String]) -> anyhow::Result<Vec<MenuItem>> {
+        Ok(parse_entries(&format!("{EXTENSION}\n{}", lines.join("\n")))?.menus)
+    }
+
+    #[test]
+    fn menus_come_out_parents_first_in_source_order() {
+        let tools = with(&with(&menu("Tools", "", 5), "item_type", "\"submenu\""), "contexts", "[\"page\",\"link\"]");
+        let tools = with(&tools, "handler", "null");
+        let items = menus(&[
+            with(&menu("child_b", "", 9), "parent", "\"Tools\""),
+            menu("last", "", 20),
+            with(&with(&menu("child_a", "", 7), "parent", "\"Tools\""), "contexts", "[\"link\"]"),
+            tools,
+            menu("first", "", 1),
+        ])
+        .unwrap();
+        let order: Vec<_> = items.iter().map(|item| item.id.as_str()).collect();
+        assert_eq!(order, ["first", "Tools", "child_a", "child_b", "last"]);
+        assert_eq!(items[0].contexts, ["page"]);
+        assert_eq!(items[2].contexts, ["link"]);
+        assert_eq!(items[3].contexts, ["page", "link"]);
+    }
+
+    #[test]
+    fn menu_mistakes_are_build_errors() {
+        let submenu = |id: &str, line| with(&with(&menu(id, "", line), "item_type", "\"submenu\""), "handler", "null");
+        let cases: Vec<(Vec<String>, &str)> = vec![
+            (vec![menu("same", "", 1), with(&menu("same", "", 2), "file", "\"src/other.rs\"")], "two context menu items are named `same` (src/lib.rs:1, src/other.rs:2)"),
+            (vec![submenu("Empty", 1)], "submenu `Empty` (src/lib.rs:1) has no items"),
+            (vec![with(&submenu("A", 1), "parent", "\"B\""), with(&submenu("B", 2), "parent", "\"A\""), with(&menu("x", "", 3), "parent", "\"A\"")], "contain each other"),
+            (vec![with(&menu("x", "", 1), "parent", "\"y\""), menu("y", "", 2)], "which is not a `#[oxichrome::submenu]`"),
+            ((0..7).map(|i| with(&menu(&format!("a{i}"), "", i), "contexts", "[\"action\"]")).collect(), "7 top-level context menu items use the `action` context"),
+        ];
+        for (lines, expected) in cases {
+            let err = menus(&lines).unwrap_err().to_string();
+            assert!(err.contains(expected), "{err}");
+        }
+        let six: Vec<String> = (0..6).map(|i| with(&menu(&format!("a{i}"), "", i), "contexts", "[\"action\"]")).collect();
+        assert_eq!(menus(&six).unwrap().len(), 6);
     }
 }

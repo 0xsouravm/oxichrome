@@ -1,5 +1,6 @@
 pub mod action;
 pub mod alarms;
+pub mod context_menus;
 pub mod content_script;
 pub mod error;
 pub mod event;
