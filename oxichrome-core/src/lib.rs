@@ -4,6 +4,7 @@ pub mod content_script;
 pub mod error;
 pub mod event;
 pub mod js_bridge;
+mod json;
 pub mod notifications;
 pub mod runtime;
 pub mod storage;

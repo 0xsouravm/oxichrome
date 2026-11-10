@@ -269,6 +269,8 @@ Notification::basic("icon.png", "Reminder", "Standup")
     .silent();
 ```
 
+Values you pass to `storage`, `tabs` and `runtime`, and the values you read back, follow `serde_json`'s rules, so a struct, a `HashMap` (integer keys too) or `serde_json::json!({...})` arrives in the browser as the plain object you'd expect, in both browsers.
+
 `chrome.action` needs `action` in the manifest. oxichrome adds it when your extension has a `#[popup]` or an `#[on(action::on_clicked)]` handler. The click event doesn't fire while a popup is set.
 
 An alarm starts either `after` a `Duration` or `at` a time in milliseconds since the epoch (for example `js_sys::Date::now() as u64 + 60_000` with `js-sys` in your dependencies), and `then_every` makes it repeat. A zero delay or a time in the past fires right away; Chrome waits at least 1 second, Firefox doesn't. A period under 1 second, or a delay or time that ends past the latest date a browser can hold (`alarms::MAX_TIME_MS`, in the year 275760), returns `Err` without reaching the browser. `get` and `get_all` return the same types: `scheduled_time` in milliseconds and `period` as a `Duration`.

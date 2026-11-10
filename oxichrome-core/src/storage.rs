@@ -17,13 +17,12 @@ async fn read<T: DeserializeOwned>(promise: Promise, key: &str) -> Result<Option
         return Ok(None);
     }
 
-    let deserialized: T = serde_wasm_bindgen::from_value(val)?;
-    Ok(Some(deserialized))
+    Ok(Some(crate::json::from_js(&val)?))
 }
 
 fn items<T: Serialize>(key: &str, value: &T) -> Result<JsValue> {
     let obj = js_sys::Object::new();
-    let js_val = value.serialize(&serde_wasm_bindgen::Serializer::json_compatible())?;
+    let js_val = crate::json::to_js(value)?;
     js_sys::Reflect::set(&obj, &JsValue::from_str(key), &js_val).map_err(OxichromeError::from)?;
     Ok(obj.into())
 }
