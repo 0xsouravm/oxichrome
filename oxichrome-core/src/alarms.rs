@@ -49,6 +49,8 @@ impl FromEventArg for Alarm {
     }
 }
 
+impl crate::event::EventArg<crate::event::events::AlarmsOnAlarm, 1> for Alarm {}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum Start {
     After(Duration),

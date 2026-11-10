@@ -158,7 +158,7 @@ async fn on_install(details: oxichrome::__private::wasm_bindgen::JsValue) {
 }
 ```
 
-Each argument is converted to the type you declare. `JsValue` always works, and some events have a typed argument, such as `alarms::Alarm` for `alarms::on_alarm`. Other types are a compile error. If an argument can't be converted, that handler doesn't run, and the error appears in the background console as an unhandled promise rejection.
+Each argument is converted to the type you declare. `JsValue` always works, and some events have typed arguments, such as `alarms::Alarm` for `alarms::on_alarm`. A type the event doesn't provide at that position is a compile error. Your own types can implement `event::FromEventArg` plus `event::EventArg<event::events::AlarmsOnAlarm, 1>` (event marker, argument position) to opt in. If an argument can't be converted, that handler doesn't run, and the error appears in the background console as an unhandled promise rejection.
 
 ```rust
 #[oxichrome::on(alarms::on_alarm)]
@@ -168,6 +168,13 @@ async fn on_alarm(alarm: oxichrome::alarms::Alarm) {
 ```
 
 Listeners are registered synchronously when the background script starts, and events that arrive before WASM is ready are delivered once it is. This covers `on_installed` and events that wake a stopped service worker.
+
+| Event | Typed arguments |
+|---|---|
+| `alarms::on_alarm` | `alarms::Alarm` |
+| `notifications::on_clicked` | `id: String` |
+| `notifications::on_closed` | `id: String, by_user: Option<bool>` |
+| `notifications::on_button_clicked` | `id: String, index: u32` |
 
 `#[on(runtime::on_message)]` handlers receive `(message, sender, send_response)`. Call `send_response` to reply, including after an `.await`. If no handler replies, the sender gets an empty response (`null` in Chrome, `undefined` in Firefox) once every handler has finished.
 
@@ -234,6 +241,24 @@ let all = alarms::get_all().await?;
 let removed: bool = alarms::clear("tick").await?;
 alarms::clear_all().await?;
 let created: bool = alarms::create_if_missing("tick", AlarmOptions::after(Duration::from_secs(60))).await?;
+
+// Notifications (requires the "notifications" permission)
+use oxichrome::notifications::{self, ListItem, Notification, Priority};
+let id: String = notifications::create(&Notification::basic("icon.png", "Done", "Upload finished")).await?;
+notifications::create_with_id("job", &Notification::progress("icon.png", "Uploading", "photo.jpg", 0)).await?;
+let updated: bool = notifications::update("job", &Notification::progress("icon.png", "Uploading", "photo.jpg", 60)).await?;
+let cleared: bool = notifications::clear("job").await?;
+let open: Vec<String> = notifications::get_all().await?;
+Notification::image("icon.png", "New photo", "From Sam", "photo.png");
+Notification::list("icon.png", "3 new emails", "", [ListItem::new("Sam", "Lunch?")]);
+Notification::basic("icon.png", "Reminder", "Standup")
+    .context_message("Calendar")
+    .event_time(time_ms)
+    .priority(Priority::High)
+    .button("Snooze")
+    .button("Dismiss")
+    .require_interaction()
+    .silent();
 ```
 
 `chrome.action` needs `action` in the manifest. oxichrome adds it when your extension has a `#[popup]` or an `#[on(action::on_clicked)]` handler. The click event doesn't fire while a popup is set.
@@ -243,6 +268,14 @@ An alarm starts either `after` a `Duration` or `at` a time in milliseconds since
 Alarm names can be up to 1024 bytes of UTF-8, and an extension can have at most 500 alarms. These are Chrome's limits, and oxichrome enforces them in Firefox too. Going over them returns `InvalidArgument` or `LimitExceeded`. At the limit, replacing an existing alarm is rejected as well, because Chrome does the same.
 
 Browsers clear an extension's alarms when it is reloaded or updated, and on browser restart. Firefox also clears them when the extension is disabled and enabled again. To keep an alarm, call `create_if_missing` from your `#[background]` function: it runs on every start, recreates the alarm when it's gone, and leaves an existing one alone. Calling `create` there instead would reset the schedule every time the service worker wakes up.
+
+Every notification needs an icon: Chrome refuses to show one without it. The icon and the `image` of an image notification are paths in your extension (`"icon.png"` or `"/icons/48.png"`), `data:` URLs, or full URLs. oxichrome loads each one before showing the notification, and a file that is missing or isn't a decodable image returns `InvalidArgument` in both browsers. Without that check, Chrome fails and Firefox silently shows no icon.
+
+`create` picks a unique id for you. `create_with_id` shows the notification under your id and replaces any open notification with the same id. `update` changes an open notification and returns `false` (creating nothing) when the id isn't open. Ids can be up to 500 bytes of UTF-8 and can't be empty or contain U+001F. Progress goes from 0 to 100, a list needs at least one item, and there can be at most 2 buttons. Anything outside these limits returns `InvalidArgument`. Chrome would otherwise accept it and then show nothing.
+
+Firefox shows basic notifications only: an image, list items, progress, buttons, `require_interaction` and `silent` are left out there, and `on_button_clicked` never fires. Firefox has no native `update`, so oxichrome replaces the notification, which pops it up again. Priority has no visible effect in Firefox. Chrome on Windows, macOS and Linux never shows notifications below the default priority, so `Priority` only offers `Default`, `High` and `Max`.
+
+`on_closed` fires when the user dismisses a notification or the system closes it, never because you called `clear` or replaced it. `by_user` is `Some` in Chrome and `None` in Firefox, which doesn't report it. Whether a click also closes the notification depends on the system: when it does, `on_closed` follows `on_clicked`. On macOS, in both browsers, a clicked notification stays open and `get_all` keeps listing it until it is closed. Notifications don't exist in content scripts.
 
 The `action` setters take a `tab_id`: `Some(id)` applies to that tab, `None` changes the default for all tabs. `set_badge_text("", None)` clears the badge, and `set_popup("", None)` removes the popup so clicks fire `on_clicked`.
 

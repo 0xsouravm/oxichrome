@@ -12,6 +12,11 @@ extern "C" {
     #[wasm_bindgen(js_namespace = ["chrome", "runtime"], js_name = sendMessage)]
     pub fn chrome_runtime_send_message(message: &JsValue) -> js_sys::Promise;
 
+    #[wasm_bindgen(catch, js_namespace = ["chrome", "runtime"], js_name = sendMessage)]
+    pub fn chrome_runtime_send_message_checked(
+        message: &JsValue,
+    ) -> Result<js_sys::Promise, JsValue>;
+
     #[wasm_bindgen(js_namespace = ["chrome", "runtime", "onInstalled"], js_name = addListener)]
     pub fn chrome_runtime_on_installed_add_listener(callback: &Closure<dyn FnMut(JsValue)>);
 
@@ -53,9 +58,7 @@ extern "C" {
     pub fn chrome_storage_session_remove(keys: &JsValue) -> Result<js_sys::Promise, JsValue>;
 
     #[wasm_bindgen(js_namespace = ["chrome", "storage", "onChanged"], js_name = addListener)]
-    pub fn chrome_storage_on_changed_add_listener(
-        callback: &Closure<dyn FnMut(JsValue, JsValue)>,
-    );
+    pub fn chrome_storage_on_changed_add_listener(callback: &Closure<dyn FnMut(JsValue, JsValue)>);
 }
 
 // chrome.tabs
@@ -72,13 +75,19 @@ extern "C" {
     pub fn chrome_tabs_get(tab_id: i32) -> Result<js_sys::Promise, JsValue>;
 
     #[wasm_bindgen(catch, js_namespace = ["chrome", "tabs"], js_name = update)]
-    pub fn chrome_tabs_update(tab_id: i32, update_properties: &JsValue) -> Result<js_sys::Promise, JsValue>;
+    pub fn chrome_tabs_update(
+        tab_id: i32,
+        update_properties: &JsValue,
+    ) -> Result<js_sys::Promise, JsValue>;
 
     #[wasm_bindgen(catch, js_namespace = ["chrome", "tabs"], js_name = remove)]
     pub fn chrome_tabs_remove(tab_id: i32) -> Result<js_sys::Promise, JsValue>;
 
     #[wasm_bindgen(catch, js_namespace = ["chrome", "tabs"], js_name = sendMessage)]
-    pub fn chrome_tabs_send_message(tab_id: i32, message: &JsValue) -> Result<js_sys::Promise, JsValue>;
+    pub fn chrome_tabs_send_message(
+        tab_id: i32,
+        message: &JsValue,
+    ) -> Result<js_sys::Promise, JsValue>;
 
     #[wasm_bindgen(js_namespace = ["chrome", "tabs", "onUpdated"], js_name = addListener)]
     pub fn chrome_tabs_on_updated_add_listener(
@@ -89,9 +98,7 @@ extern "C" {
     pub fn chrome_tabs_on_removed_add_listener(callback: &Closure<dyn FnMut(JsValue, JsValue)>);
 
     #[wasm_bindgen(js_namespace = ["chrome", "tabs", "onActivated"], js_name = addListener)]
-    pub fn chrome_tabs_on_activated_add_listener(
-        callback: &Closure<dyn FnMut(JsValue)>,
-    );
+    pub fn chrome_tabs_on_activated_add_listener(callback: &Closure<dyn FnMut(JsValue)>);
 }
 
 #[wasm_bindgen]
@@ -103,10 +110,14 @@ extern "C" {
     pub fn chrome_action_get_badge_text(details: &JsValue) -> Result<js_sys::Promise, JsValue>;
 
     #[wasm_bindgen(catch, js_namespace = ["chrome", "action"], js_name = setBadgeBackgroundColor)]
-    pub fn chrome_action_set_badge_background_color(details: &JsValue) -> Result<js_sys::Promise, JsValue>;
+    pub fn chrome_action_set_badge_background_color(
+        details: &JsValue,
+    ) -> Result<js_sys::Promise, JsValue>;
 
     #[wasm_bindgen(catch, js_namespace = ["chrome", "action"], js_name = setBadgeTextColor)]
-    pub fn chrome_action_set_badge_text_color(details: &JsValue) -> Result<js_sys::Promise, JsValue>;
+    pub fn chrome_action_set_badge_text_color(
+        details: &JsValue,
+    ) -> Result<js_sys::Promise, JsValue>;
 
     #[wasm_bindgen(catch, js_namespace = ["chrome", "action"], js_name = setTitle)]
     pub fn chrome_action_set_title(details: &JsValue) -> Result<js_sys::Promise, JsValue>;
@@ -152,6 +163,40 @@ extern "C" {
 
     #[wasm_bindgen(js_namespace = ["chrome", "alarms", "onAlarm"], js_name = addListener)]
     pub fn chrome_alarms_on_alarm_add_listener(callback: &Closure<dyn FnMut(JsValue)>);
+}
+
+#[wasm_bindgen]
+extern "C" {
+    #[wasm_bindgen(catch, js_namespace = ["chrome", "notifications"], js_name = create)]
+    pub fn chrome_notifications_create(
+        id: &str,
+        options: &JsValue,
+    ) -> Result<js_sys::Promise, JsValue>;
+
+    #[wasm_bindgen(catch, js_namespace = ["chrome", "notifications"], js_name = update)]
+    pub fn chrome_notifications_update(
+        id: &str,
+        options: &JsValue,
+    ) -> Result<js_sys::Promise, JsValue>;
+
+    #[wasm_bindgen(catch, js_namespace = ["chrome", "notifications"], js_name = clear)]
+    pub fn chrome_notifications_clear(id: &str) -> Result<js_sys::Promise, JsValue>;
+
+    #[wasm_bindgen(catch, js_namespace = ["chrome", "notifications"], js_name = getAll)]
+    pub fn chrome_notifications_get_all() -> Result<js_sys::Promise, JsValue>;
+
+    #[wasm_bindgen(js_namespace = ["chrome", "notifications", "onClicked"], js_name = addListener)]
+    pub fn chrome_notifications_on_clicked_add_listener(callback: &Closure<dyn FnMut(JsValue)>);
+
+    #[wasm_bindgen(js_namespace = ["chrome", "notifications", "onClosed"], js_name = addListener)]
+    pub fn chrome_notifications_on_closed_add_listener(
+        callback: &Closure<dyn FnMut(JsValue, JsValue)>,
+    );
+
+    #[wasm_bindgen(js_namespace = ["chrome", "notifications", "onButtonClicked"], js_name = addListener)]
+    pub fn chrome_notifications_on_button_clicked_add_listener(
+        callback: &Closure<dyn FnMut(JsValue, JsValue)>,
+    );
 }
 
 #[macro_export]

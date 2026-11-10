@@ -7,6 +7,7 @@ pub use oxichrome_core::error::{OxichromeError, Result};
 pub use oxichrome_core::action;
 pub use oxichrome_core::alarms;
 pub use oxichrome_core::event;
+pub use oxichrome_core::notifications;
 pub use oxichrome_core::runtime;
 pub use oxichrome_core::storage;
 pub use oxichrome_core::tabs;
@@ -31,6 +32,7 @@ pub mod prelude {
     pub use crate::core::error;
     pub use crate::action;
     pub use crate::alarms;
+    pub use crate::notifications;
     pub use crate::runtime;
     pub use crate::storage;
     pub use crate::tabs;

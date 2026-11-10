@@ -1,5 +1,6 @@
 use proc_macro2::TokenStream;
-use quote::{format_ident, quote};
+use quote::{format_ident, quote, quote_spanned};
+use syn::spanned::Spanned;
 use syn::{FnArg, ItemFn};
 
 use crate::parse::EventArgs;
@@ -64,6 +65,27 @@ pub fn expand(attr: TokenStream, item: TokenStream) -> Result<TokenStream, syn::
 
     let fnmut_params = raw_args.iter().map(|_| quote! { #js_type });
 
+    let camel = |ident: &syn::Ident| {
+        ident
+            .to_string()
+            .split('_')
+            .map(|part| {
+                let mut chars = part.chars();
+                chars
+                    .next()
+                    .map(|first| first.to_uppercase().chain(chars).collect::<String>())
+                    .unwrap_or_default()
+            })
+            .collect::<String>()
+    };
+    let marker = format_ident!("{}{}", camel(namespace), camel(event_name));
+    let arg_checks = arg_types.iter().enumerate().map(|(i, ty)| {
+        let position = i + 1;
+        quote_spanned! {ty.span()=>
+            oxichrome::core::event::assert_arg::<#ty, oxichrome::core::event::events::#marker, #position>();
+        }
+    });
+
     Ok(quote! {
         #func
 
@@ -73,6 +95,7 @@ pub fn expand(attr: TokenStream, item: TokenStream) -> Result<TokenStream, syn::
             use oxichrome::__private::wasm_bindgen::prelude::Closure;
             let _: fn(&Closure<dyn FnMut(#(#fnmut_params),*)>) =
                 oxichrome::core::js_bridge::#bridge_fn_name;
+            #(#arg_checks)*
         }
 
         #[doc(hidden)]
