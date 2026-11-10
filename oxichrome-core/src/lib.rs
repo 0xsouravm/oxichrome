@@ -1,6 +1,8 @@
 pub mod action;
+pub mod alarms;
 pub mod content_script;
 pub mod error;
+pub mod event;
 pub mod js_bridge;
 pub mod runtime;
 pub mod storage;

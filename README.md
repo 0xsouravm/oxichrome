@@ -138,7 +138,7 @@ An invalid ID is a compile error, for both Firefox and Chromium builds.
 
 ### `#[oxichrome::background]`
 
-Marks an async function as the background service worker entry point.
+Marks an async function as the background service worker entry point. It runs every time the background starts: on install, on browser startup, and whenever the service worker or event page wakes up for an event.
 
 ```rust
 #[oxichrome::background]
@@ -155,6 +155,15 @@ Registers an async function as a Chrome event listener.
 #[oxichrome::on(runtime::on_installed)]
 async fn on_install(details: oxichrome::__private::wasm_bindgen::JsValue) {
     oxichrome::log!("Installed: {:?}", details);
+}
+```
+
+Each argument is converted to the type you declare. `JsValue` always works, and some events have a typed argument, such as `alarms::Alarm` for `alarms::on_alarm`. Other types are a compile error. If an argument can't be converted, that handler doesn't run, and the error appears in the background console as an unhandled promise rejection.
+
+```rust
+#[oxichrome::on(alarms::on_alarm)]
+async fn on_alarm(alarm: oxichrome::alarms::Alarm) {
+    oxichrome::log!("{} fired", alarm.name);
 }
 ```
 
@@ -213,9 +222,27 @@ oxichrome::action::set_badge_text("3", None).await?;
 oxichrome::action::set_badge_background_color("#ff6600", None).await?;
 oxichrome::action::set_title("My Extension", Some(tab_id)).await?;
 oxichrome::action::set_icon("icon.png", None).await?;
+
+// Alarms (requires the "alarms" permission)
+use std::time::Duration;
+use oxichrome::alarms::{self, AlarmOptions};
+alarms::create("once", AlarmOptions::after(Duration::from_secs(90))).await?;
+alarms::create("at", AlarmOptions::at(time_ms)).await?;
+alarms::create("tick", AlarmOptions::after(Duration::from_secs(60)).then_every(Duration::from_secs(300))).await?;
+let alarm = alarms::get("tick").await?;
+let all = alarms::get_all().await?;
+let removed: bool = alarms::clear("tick").await?;
+alarms::clear_all().await?;
+let created: bool = alarms::create_if_missing("tick", AlarmOptions::after(Duration::from_secs(60))).await?;
 ```
 
 `chrome.action` needs `action` in the manifest. oxichrome adds it when your extension has a `#[popup]` or an `#[on(action::on_clicked)]` handler. The click event doesn't fire while a popup is set.
+
+An alarm starts either `after` a `Duration` or `at` a time in milliseconds since the epoch (for example `js_sys::Date::now() as u64 + 60_000` with `js-sys` in your dependencies), and `then_every` makes it repeat. A zero delay or a time in the past fires right away; Chrome waits at least 1 second, Firefox doesn't. A period under 1 second, or a delay or time that ends past the latest date a browser can hold (`alarms::MAX_TIME_MS`, in the year 275760), returns `Err` without reaching the browser. `get` and `get_all` return the same types: `scheduled_time` in milliseconds and `period` as a `Duration`.
+
+Alarm names can be up to 1024 bytes of UTF-8, and an extension can have at most 500 alarms. These are Chrome's limits, and oxichrome enforces them in Firefox too. Going over them returns `InvalidArgument` or `LimitExceeded`. At the limit, replacing an existing alarm is rejected as well, because Chrome does the same.
+
+Browsers clear an extension's alarms when it is reloaded or updated, and on browser restart. Firefox also clears them when the extension is disabled and enabled again. To keep an alarm, call `create_if_missing` from your `#[background]` function: it runs on every start, recreates the alarm when it's gone, and leaves an existing one alone. Calling `create` there instead would reset the schedule every time the service worker wakes up.
 
 The `action` setters take a `tab_id`: `Some(id)` applies to that tab, `None` changes the default for all tabs. `set_badge_text("", None)` clears the badge, and `set_popup("", None)` removes the popup so clicks fire `on_clicked`.
 

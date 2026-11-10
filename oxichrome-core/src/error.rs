@@ -43,6 +43,12 @@ pub enum OxichromeError {
 
     #[error("unexpected value: {0}")]
     UnexpectedValue(String),
+
+    #[error("invalid argument: {0}")]
+    InvalidArgument(String),
+
+    #[error("limit exceeded: {0}")]
+    LimitExceeded(String),
 }
 
 impl From<JsValue> for OxichromeError {

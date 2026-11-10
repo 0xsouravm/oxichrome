@@ -133,6 +133,27 @@ extern "C" {
     pub fn chrome_action_on_clicked_add_listener(callback: &Closure<dyn FnMut(JsValue)>);
 }
 
+#[wasm_bindgen]
+extern "C" {
+    #[wasm_bindgen(catch, js_namespace = ["chrome", "alarms"], js_name = create)]
+    pub fn chrome_alarms_create(name: &str, alarm_info: &JsValue) -> Result<JsValue, JsValue>;
+
+    #[wasm_bindgen(catch, js_namespace = ["chrome", "alarms"], js_name = get)]
+    pub fn chrome_alarms_get(name: &str) -> Result<js_sys::Promise, JsValue>;
+
+    #[wasm_bindgen(catch, js_namespace = ["chrome", "alarms"], js_name = getAll)]
+    pub fn chrome_alarms_get_all() -> Result<js_sys::Promise, JsValue>;
+
+    #[wasm_bindgen(catch, js_namespace = ["chrome", "alarms"], js_name = clear)]
+    pub fn chrome_alarms_clear(name: &str) -> Result<js_sys::Promise, JsValue>;
+
+    #[wasm_bindgen(catch, js_namespace = ["chrome", "alarms"], js_name = clearAll)]
+    pub fn chrome_alarms_clear_all() -> Result<js_sys::Promise, JsValue>;
+
+    #[wasm_bindgen(js_namespace = ["chrome", "alarms", "onAlarm"], js_name = addListener)]
+    pub fn chrome_alarms_on_alarm_add_listener(callback: &Closure<dyn FnMut(JsValue)>);
+}
+
 #[macro_export]
 macro_rules! log {
     ($($arg:tt)*) => {

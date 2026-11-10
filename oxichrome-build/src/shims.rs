@@ -90,7 +90,10 @@ pub fn generate_background_js(metadata: &ExtensionMetadata, crate_name: &str) ->
         format!(", {{ {} }}", exports.join(", "))
     };
 
-    let listeners = generate_listeners(metadata);
+    let mut listeners = generate_listeners(metadata);
+    if !metadata.background_functions.is_empty() {
+        listeners.push_str("chrome.runtime.onStartup.addListener(() => {});\n");
+    }
 
     let mut init_calls = String::new();
     for bg in &metadata.background_functions {
@@ -277,6 +280,29 @@ mod tests {
             content_scripts: vec![],
             gecko_id: None,
         }
+    }
+
+    #[test]
+    fn test_background_js_starts_with_the_browser_when_it_has_a_background_fn() {
+        let mut metadata = metadata_with_handlers(&[]);
+        metadata.background_functions = vec!["start".to_string()];
+        let js = generate_background_js(&metadata, "ext");
+
+        let startup = js.find("chrome.runtime.onStartup.addListener").unwrap();
+        let init = js.find("await init();").unwrap();
+        assert!(startup < init);
+        assert_eq!(
+            js.matches("chrome.runtime.onStartup.addListener").count(),
+            1
+        );
+    }
+
+    #[test]
+    fn test_background_js_without_a_background_fn_does_not_start_with_the_browser() {
+        let metadata = metadata_with_handlers(&[("clicked", "action", "on_clicked")]);
+        let js = generate_background_js(&metadata, "ext");
+
+        assert!(!js.contains("onStartup"));
     }
 
     #[test]

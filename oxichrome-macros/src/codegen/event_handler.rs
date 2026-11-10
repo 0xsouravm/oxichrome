@@ -1,6 +1,6 @@
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
-use syn::{FnArg, ItemFn, Pat};
+use syn::{FnArg, ItemFn};
 
 use crate::parse::EventArgs;
 
@@ -16,9 +16,19 @@ pub fn expand(attr: TokenStream, item: TokenStream) -> Result<TokenStream, syn::
     }
 
     let fn_name = &func.sig.ident;
-    let fn_body = &func.block;
-    let vis = &func.vis;
-    let attrs = &func.attrs;
+
+    let mut arg_types = Vec::new();
+    for arg in &func.sig.inputs {
+        match arg {
+            FnArg::Typed(pat_type) => arg_types.push(pat_type.ty.as_ref().clone()),
+            FnArg::Receiver(receiver) => {
+                return Err(syn::Error::new_spanned(
+                    receiver,
+                    "#[oxichrome::on(...)] function can't take `self`",
+                ))
+            }
+        }
+    }
 
     let export_fn_name = format_ident!("__oxichrome_on_{}", fn_name);
     let check_fn_name = format_ident!("__oxichrome_check_{}", fn_name);
@@ -28,40 +38,34 @@ pub fn expand(attr: TokenStream, item: TokenStream) -> Result<TokenStream, syn::
 
     let bridge_fn_name = format_ident!("chrome_{namespace}_{event_name}_add_listener");
 
-    let param_names: Vec<_> = func
-        .sig
-        .inputs
-        .iter()
-        .map(|arg| match arg {
-            FnArg::Typed(pat_type) => match pat_type.pat.as_ref() {
-                Pat::Ident(pat_ident) => pat_ident.ident.clone(),
-                _ => format_ident!("_arg"),
-            },
-            FnArg::Receiver(_) => format_ident!("self_"),
-        })
-        .collect();
-
     let js_type = quote! { oxichrome::__private::wasm_bindgen::JsValue };
 
-    let fn_params = param_names.iter().map(|name| {
-        quote! { #name: #js_type }
-    });
+    let raw_args: Vec<_> = (0..arg_types.len())
+        .map(|i| format_ident!("__oxichrome_arg{}", i))
+        .collect();
 
-    let export_params = param_names.iter().map(|name| {
-        quote! { #name: #js_type }
-    });
+    let conversions = raw_args
+        .iter()
+        .zip(&arg_types)
+        .enumerate()
+        .map(|(i, (raw, ty))| {
+            let position = i + 1;
+            let handler = fn_name.to_string();
+            quote! {
+                let #raw = <#ty as oxichrome::core::event::FromEventArg>::from_event_arg(#raw)
+                    .map_err(|err| {
+                        #js_type::from(oxichrome::__private::js_sys::Error::new(&format!(
+                            "[oxichrome] {} argument {} could not be read: {}",
+                            #handler, #position, err
+                        )))
+                    })?;
+            }
+        });
 
-    let forward_args = param_names.iter().map(|name| {
-        quote! { #name }
-    });
-
-    let fnmut_params = param_names.iter().map(|_| {
-        quote! { #js_type }
-    });
+    let fnmut_params = raw_args.iter().map(|_| quote! { #js_type });
 
     Ok(quote! {
-        #(#attrs)*
-        #vis async fn #fn_name(#(#fn_params),*) #fn_body
+        #func
 
         #[doc(hidden)]
         #[allow(dead_code)]
@@ -73,9 +77,10 @@ pub fn expand(attr: TokenStream, item: TokenStream) -> Result<TokenStream, syn::
 
         #[doc(hidden)]
         #[oxichrome::__private::wasm_bindgen::prelude::wasm_bindgen]
-        pub fn #export_fn_name(#(#export_params),*) -> oxichrome::__private::js_sys::Promise {
+        pub fn #export_fn_name(#(#raw_args: #js_type),*) -> oxichrome::__private::js_sys::Promise {
             oxichrome::__private::wasm_bindgen_futures::future_to_promise(async move {
-                #fn_name(#(#forward_args),*).await;
+                #(#conversions)*
+                #fn_name(#(#raw_args),*).await;
                 Ok(#js_type::UNDEFINED)
             })
         }
