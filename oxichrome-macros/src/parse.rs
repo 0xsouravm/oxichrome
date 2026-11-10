@@ -614,6 +614,7 @@ impl Parse for EventArgs {
 
 #[derive(Debug)]
 pub struct ContentScriptArgs {
+    pub on_demand: bool,
     pub matches: Vec<LitStr>,
     pub run_at: Option<Ident>,
     pub all_frames: Option<bool>,
@@ -626,13 +627,19 @@ impl Parse for ContentScriptArgs {
         let mut run_at: Option<Ident> = None;
         let mut all_frames: Option<bool> = None;
         let mut css: Vec<LitStr> = Vec::new();
+        let mut matches_key: Option<Ident> = None;
+        let mut extras: Vec<Ident> = Vec::new();
 
         while !input.is_empty() {
             let key: Ident = input.parse()?;
             input.parse::<Token![=]>()?;
+            if key != "matches" {
+                extras.push(key.clone());
+            }
 
             match key.to_string().as_str() {
                 "matches" => {
+                    matches_key = Some(key.clone());
                     let content;
                     syn::bracketed!(content in input);
                     while !content.is_empty() {
@@ -673,10 +680,17 @@ impl Parse for ContentScriptArgs {
             }
         }
 
-        if matches.is_empty() {
+        if let Some(key) = &matches_key {
+            if matches.is_empty() {
+                return Err(syn::Error::new(
+                    key.span(),
+                    "list at least one pattern, or remove `matches` to make a script you run on demand with `SCRIPT.run`",
+                ));
+            }
+        } else if let Some(extra) = extras.first() {
             return Err(syn::Error::new(
-                proc_macro2::Span::call_site(),
-                "missing required argument `matches`",
+                extra.span(),
+                format!("`{extra}` only applies to scripts that run on matching pages; add `matches = [...]`, or remove `{extra}` for a script you run on demand"),
             ));
         }
 
@@ -685,6 +699,7 @@ impl Parse for ContentScriptArgs {
         }
 
         Ok(ContentScriptArgs {
+            on_demand: matches_key.is_none(),
             matches,
             run_at,
             all_frames,
@@ -1446,5 +1461,22 @@ mod tests {
         assert!(err.contains("a submenu can't be a checkbox"), "{err}");
         let err = submenu(quote::quote! { title = "Tools", id = "x" }).unwrap_err().to_string();
         assert!(err.contains("the struct name"), "{err}");
+    }
+
+    #[test]
+    fn content_script_without_matches_runs_on_demand() {
+        let args: ContentScriptArgs = syn::parse2(quote::quote! {}).unwrap();
+        assert!(args.on_demand);
+        let args: ContentScriptArgs = syn::parse2(quote::quote! { matches = ["<all_urls>"], run_at = DocumentEnd }).unwrap();
+        assert!(!args.on_demand);
+        for (tokens, expected) in [
+            (quote::quote! { matches = [] }, "list at least one pattern, or remove `matches`"),
+            (quote::quote! { run_at = DocumentEnd }, "`run_at` only applies to scripts that run on matching pages"),
+            (quote::quote! { css = ["a.css"] }, "`css` only applies"),
+            (quote::quote! { all_frames = true }, "`all_frames` only applies"),
+        ] {
+            let err = syn::parse2::<ContentScriptArgs>(tokens).err().unwrap().to_string();
+            assert!(err.contains(expected), "{err}");
+        }
     }
 }

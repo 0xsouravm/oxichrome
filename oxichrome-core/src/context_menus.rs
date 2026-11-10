@@ -141,7 +141,7 @@ pub enum MediaType {
 pub struct Click {
     pub page_url: Option<String>,
     pub frame_url: Option<String>,
-    pub frame_id: Option<i32>,
+    pub frame_id: Option<i64>,
     pub link_url: Option<String>,
     pub src_url: Option<String>,
     pub media_type: Option<MediaType>,

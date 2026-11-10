@@ -231,3 +231,86 @@ extern "C" {
     #[wasm_bindgen(catch)]
     pub fn open_shortcut_settings() -> Result<js_sys::Promise, JsValue>;
 }
+
+#[wasm_bindgen(inline_js = r#"
+function api() {
+    if (!globalThis.chrome?.scripting) {
+        throw new Error('chrome.scripting is missing: add "scripting" to `permissions` in #[oxichrome::extension]');
+    }
+    return chrome.scripting;
+}
+
+async function inject(url, name, arg) {
+    const fresh = '__oxichrome_fresh_wasm';
+    const pending = (globalThis.__oxichrome_script_panics ||= new Set());
+    let settle;
+    const panicked = new Promise((resolve) => { settle = resolve; });
+    pending.add(settle);
+    const restart = () => { globalThis[fresh] = (globalThis[fresh] || 0) + 1; };
+    try {
+        const module = await import(globalThis[fresh] ? `${url}?${globalThis[fresh]}` : url);
+        await module.default();
+        const outcome = await Promise.race([
+            module[name](arg).then((ok) => ({ ok })),
+            panicked.then((message) => ({ panic: message })),
+        ]);
+        if (outcome.panic !== undefined) {
+            restart();
+            return { err: outcome.panic };
+        }
+        return outcome;
+    } catch (error) {
+        if (error instanceof WebAssembly.RuntimeError) {
+            restart();
+            return { err: `it panicked (${error.message})` };
+        }
+        return { err: String((error && error.message) || error) };
+    } finally {
+        pending.delete(settle);
+    }
+}
+
+export async function run_script(target, module, name, arg) {
+    const results = await api().executeScript({
+        target,
+        func: inject,
+        args: [chrome.runtime.getURL(module), name, arg],
+    });
+    return (results || []).filter((frame) => frame).map((frame) => ({
+        frameId: frame.frameId,
+        ok: frame.result && typeof frame.result.ok === 'string' ? frame.result.ok : undefined,
+        err: frame.result && frame.result.err !== undefined
+            ? frame.result.err
+            : frame.error !== undefined
+                ? String((frame.error && frame.error.message) || frame.error)
+                : (frame.result ? undefined : 'the script did not run in this frame'),
+    }));
+}
+
+export function report_script_panic(message) {
+    for (const settle of globalThis.__oxichrome_script_panics || []) {
+        settle(message);
+    }
+}
+
+export async function insert_css(target, css) {
+    await api().removeCSS({ target, css });
+    await api().insertCSS({ target, css });
+}
+
+export async function remove_css(target, css) {
+    await api().removeCSS({ target, css });
+}
+"#)]
+extern "C" {
+    #[wasm_bindgen(catch)]
+    pub fn run_script(target: &JsValue, module: &str, name: &str, arg: &str) -> Result<js_sys::Promise, JsValue>;
+
+    pub fn report_script_panic(message: &str);
+
+    #[wasm_bindgen(catch)]
+    pub fn insert_css(target: &JsValue, css: &str) -> Result<js_sys::Promise, JsValue>;
+
+    #[wasm_bindgen(catch)]
+    pub fn remove_css(target: &JsValue, css: &str) -> Result<js_sys::Promise, JsValue>;
+}

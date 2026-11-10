@@ -158,6 +158,12 @@ enum Entry {
     },
     Menu(MenuEntry),
     Command(CommandEntry),
+    Script {
+        name: String,
+        file: String,
+        line: usize,
+        column: usize,
+    },
 }
 
 fn read_leb128(bytes: &[u8], pos: &mut usize) -> anyhow::Result<usize> {
@@ -257,6 +263,7 @@ pub fn parse_entries(text: &str) -> anyhow::Result<ExtensionMetadata> {
     let mut menus = Vec::new();
     let mut commands = Vec::new();
     let mut backgrounds: Vec<(String, String)> = Vec::new();
+    let mut scripts: Vec<String> = Vec::new();
     for line in text.lines().filter(|line| !line.trim().is_empty()) {
         let entry: Entry = serde_json::from_str(line).with_context(|| {
             format!(
@@ -315,6 +322,12 @@ pub fn parse_entries(text: &str) -> anyhow::Result<ExtensionMetadata> {
             }),
             Entry::Menu(menu) => menus.push(menu),
             Entry::Command(command) => commands.push(command),
+            Entry::Script {
+                name,
+                file,
+                line,
+                column,
+            } => scripts.push(format!("`{name}` ({file}:{line}:{column})")),
         }
     }
 
@@ -346,6 +359,8 @@ pub fn parse_entries(text: &str) -> anyhow::Result<ExtensionMetadata> {
             options_pages.join(", ")
         );
     }
+    scripts.sort();
+    check_scripts(&scripts, &metadata.permissions, &metadata.host_permissions)?;
     metadata.menus = resolve_menus(menus)?;
     let action_shortcut = metadata
         .action
@@ -364,6 +379,28 @@ pub fn parse_entries(text: &str) -> anyhow::Result<ExtensionMetadata> {
         .content_scripts
         .sort_by(|a, b| (&a.fn_name, &a.export).cmp(&(&b.fn_name, &b.export)));
     Ok(metadata)
+}
+
+fn check_scripts(scripts: &[String], permissions: &[String], host_permissions: &[String]) -> anyhow::Result<()> {
+    let Some(first) = scripts.first() else {
+        return Ok(());
+    };
+    let listed = if scripts.len() == 1 {
+        format!("the on-demand script {first}")
+    } else {
+        format!("the on-demand scripts {}", scripts.join(", "))
+    };
+    if !permissions.iter().any(|permission| permission == "scripting") {
+        bail!(
+            "add \"scripting\" to `permissions` in #[oxichrome::extension]; {listed} can't run without it"
+        );
+    }
+    if host_permissions.is_empty() && !permissions.iter().any(|permission| permission == "activeTab") {
+        bail!(
+            "{listed} can't reach any page: add the sites to `host_permissions` in #[oxichrome::extension] (like \"https://example.com/*\"), or add \"activeTab\" to `permissions` to run them in the current tab right after a click on the toolbar button, a menu item or a shortcut"
+        );
+    }
+    Ok(())
 }
 
 fn resolve_menus(mut entries: Vec<MenuEntry>) -> anyhow::Result<Vec<MenuItem>> {
@@ -824,5 +861,23 @@ mod tests {
         assert_eq!(commands(&four, None).unwrap().len(), 4);
         let unbound: Vec<String> = (1..=9).map(|i| command(&format!("c{i}"), "null", i)).collect();
         assert_eq!(commands(&unbound, Some(&key("Alt+Shift+O"))).unwrap().len(), 9);
+    }
+
+    #[test]
+    fn on_demand_scripts_need_scripting_and_page_access() {
+        let script = |name: &str, line: usize| format!(r#"{{"kind":"script","name":"{name}","file":"src/lib.rs","line":{line},"column":1}}"#);
+        let with = |permissions: &str, hosts: &str, lines: &[String]| {
+            let ext = format!(r#"{{"kind":"extension","name":"T","version":"1.0.0","description":null,"gecko_id":null,"permissions":{permissions},"host_permissions":{hosts},"icons":[],"action":null}}"#);
+            parse_entries(&std::iter::once(ext).chain(lines.iter().cloned()).collect::<Vec<_>>().join("\n"))
+        };
+        let one = [script("grab", 3)];
+        let two = [script("b", 9), script("a", 4)];
+        let err = with("[]", r#"["https://a.com/*"]"#, &one).unwrap_err().to_string();
+        assert!(err.contains(r#"add "scripting" to `permissions`"#) && err.contains("the on-demand script `grab` (src/lib.rs:3:1)"), "{err}");
+        let err = with(r#"["scripting"]"#, "[]", &two).unwrap_err().to_string();
+        assert!(err.contains("the on-demand scripts `a` (src/lib.rs:4:1), `b` (src/lib.rs:9:1) can't reach any page"), "{err}");
+        assert!(with(r#"["scripting"]"#, r#"["https://a.com/*"]"#, &one).is_ok());
+        assert!(with(r#"["scripting","activeTab"]"#, "[]", &two).is_ok());
+        assert!(with("[]", "[]", &[]).is_ok());
     }
 }

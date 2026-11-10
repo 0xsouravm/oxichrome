@@ -9,6 +9,7 @@ pub mod js_bridge;
 mod json;
 pub mod notifications;
 pub mod runtime;
+pub mod scripting;
 pub mod storage;
 pub mod tabs;
 

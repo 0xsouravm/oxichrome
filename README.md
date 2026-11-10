@@ -208,6 +208,75 @@ fn Options() -> impl IntoView {
 }
 ```
 
+### `#[oxichrome::content_script(...)]`
+
+Rust that runs inside web pages. With `matches`, it starts by itself on every matching page. Without `matches`, it runs when you call it, and you can pass it a value and get one back.
+
+```rust
+#[oxichrome::content_script(matches = ["https://*.example.com/*"], run_at = DocumentEnd)]
+async fn highlight() {
+    oxichrome::log!("running in {}", web_sys::window().unwrap().location().href().unwrap());
+}
+```
+
+| Argument | |
+|---|---|
+| `matches` | The pages to run on, as [match patterns](https://developer.chrome.com/docs/extensions/develop/concepts/match-patterns). Patterns only one browser accepts are compile errors. |
+| `run_at` | `DocumentStart`, `DocumentEnd` or `DocumentIdle` (the default). |
+| `all_frames` | `true` to run in iframes too. |
+| `css` | Stylesheets from `static/` to add to those pages. |
+
+A script that starts by itself takes no argument and returns nothing, since nothing calls it.
+
+**On demand.** Leave out `matches` and the function runs only when you ask, from the background, the popup, a menu item or a shortcut. It takes at most one argument and can return a value; both cross into and out of the page as a copy, so they must implement `Serialize` and `Deserialize`, and can't borrow (`String`, not `&str`). Several values go in a struct or a tuple.
+
+```rust
+#[derive(Serialize, Deserialize)]
+struct Found { title: String, links: usize }
+
+#[oxichrome::content_script]
+async fn inspect(selector: String) -> Found {
+    let document = web_sys::window().unwrap().document().unwrap();
+    let links = document.query_selector_all(&selector).unwrap().length() as usize;
+    Found { title: document.title(), links }
+}
+
+#[oxichrome::command(description = "Inspect this page", shortcut = "Alt+Shift+I")]
+async fn inspect_page(press: commands::Press) {
+    let Some(tab_id) = press.tab_id else { return };
+    match inspect::SCRIPT.run(tab_id, "a[href]".to_string()).await {
+        Ok(found) => oxichrome::log!("{} has {} links", found.title, found.links),
+        Err(err) => oxichrome::log!("couldn't inspect: {err}"),
+    }
+}
+```
+
+`inspect::SCRIPT.run(tab_id, arg)` runs in the tab's top frame and returns the function's value. You can't call `inspect(...)` directly: outside the page there's no page to inspect, so it's a compile error. `run_in` picks frames and returns one result per frame:
+
+```rust
+use oxichrome::scripting::Target;
+
+let frames = inspect::SCRIPT.run_in(Target::tab(tab_id).all_frames(), "a".into()).await?;
+for frame in frames {
+    oxichrome::log!("frame {}: {:?}", frame.frame_id, frame.result.map(|found| found.links));
+}
+let one = inspect::SCRIPT.run_in(Target::tab(tab_id).frames(&[click.frame_id.unwrap_or(0)]), "a".into()).await?;
+```
+
+An on-demand script needs `"scripting"` in `permissions`, and either `host_permissions` for the sites or `"activeTab"`, which allows the current tab right after someone clicks the toolbar button or a menu item, or presses a shortcut. The build fails with a message when either is missing.
+
+`run` returns `Err` with the reason when the script can't run: the tab doesn't exist, the extension has no access to that page (the message says which permission to add), or it's a browser page or the extension store, which no extension may touch. When the script panics, `run` returns `Err` with the panic message instead of waiting forever, and the next run in that page starts fresh. Each page keeps the script's state between runs (a `thread_local!` counter keeps counting), and after an update, pages that are already open run the new code. Results can be large (several MB is fine).
+
+Add or remove CSS in a page, with the same permissions:
+
+```rust
+oxichrome::scripting::insert_css(tab_id, "body { zoom: 1.2 }").await?;
+oxichrome::scripting::remove_css(tab_id, "body { zoom: 1.2 }").await?;
+oxichrome::scripting::insert_css(Target::tab(tab_id).all_frames(), "p { color: red }").await?;
+```
+
+Inserting the same CSS twice adds it once, so one `remove_css` always removes it. Chrome would otherwise stack copies and Firefox wouldn't.
+
 ### `#[oxichrome::menu(...)]` and `#[oxichrome::submenu(...)]`
 
 Adds an item to the right-click menu. The async function runs when someone clicks it.

@@ -11,6 +11,7 @@ pub use oxichrome_core::context_menus;
 pub use oxichrome_core::event;
 pub use oxichrome_core::notifications;
 pub use oxichrome_core::runtime;
+pub use oxichrome_core::scripting;
 pub use oxichrome_core::storage;
 pub use oxichrome_core::tabs;
 
@@ -38,6 +39,7 @@ pub mod prelude {
     pub use crate::context_menus;
     pub use crate::notifications;
     pub use crate::runtime;
+    pub use crate::scripting;
     pub use crate::storage;
     pub use crate::tabs;
     pub use serde::{Serialize, Deserialize};
