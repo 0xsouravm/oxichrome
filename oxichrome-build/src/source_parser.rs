@@ -1,6 +1,7 @@
 //! Parses Rust source files to extract oxichrome metadata without compiling.
 
 use std::path::Path;
+use syn::parse::{Parse, ParseStream};
 use syn::visit::Visit;
 use syn::{Attribute, Expr, ExprLit, ItemFn, ItemStruct, Lit, Meta, MetaNameValue};
 
@@ -17,6 +18,109 @@ pub struct ExtensionMetadata {
     pub has_options_page: bool,
     pub content_scripts: Vec<ContentScript>,
     pub gecko_id: Option<String>,
+    pub icons: Vec<(u32, String)>,
+    pub action: Option<ActionMetadata>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct ActionMetadata {
+    pub default_title: Option<String>,
+    pub default_icon: Option<ActionIcon>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum ActionIcon {
+    Single(String),
+    Sizes(Vec<(u32, String)>),
+}
+
+enum ArgValue {
+    Str(String),
+    List(Vec<String>),
+    Map(Vec<(String, ArgValue)>),
+    Other,
+}
+
+impl Parse for ArgValue {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        if input.peek(syn::LitStr) {
+            return Ok(ArgValue::Str(input.parse::<syn::LitStr>()?.value()));
+        }
+        if input.peek(syn::token::Bracket) {
+            let content;
+            syn::bracketed!(content in input);
+            let items =
+                syn::punctuated::Punctuated::<syn::LitStr, syn::Token![,]>::parse_terminated(
+                    &content,
+                )?;
+            return Ok(ArgValue::List(
+                items.iter().map(|item| item.value()).collect(),
+            ));
+        }
+        if input.peek(syn::token::Brace) {
+            let content;
+            syn::braced!(content in input);
+            let mut entries = Vec::new();
+            while !content.is_empty() {
+                let key = if content.peek(syn::LitInt) {
+                    content.parse::<syn::LitInt>()?.base10_digits().to_string()
+                } else if content.peek(syn::LitStr) {
+                    content.parse::<syn::LitStr>()?.value()
+                } else {
+                    content.parse::<syn::Ident>()?.to_string()
+                };
+                content.parse::<syn::Token![=]>()?;
+                entries.push((key, content.parse()?));
+                if !content.is_empty() {
+                    content.parse::<syn::Token![,]>()?;
+                }
+            }
+            return Ok(ArgValue::Map(entries));
+        }
+        input.parse::<syn::Expr>()?;
+        Ok(ArgValue::Other)
+    }
+}
+
+struct ExtensionArg {
+    key: String,
+    value: ArgValue,
+}
+
+impl Parse for ExtensionArg {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        let key = input.parse::<syn::Ident>()?.to_string();
+        input.parse::<syn::Token![=]>()?;
+        Ok(ExtensionArg {
+            key,
+            value: input.parse()?,
+        })
+    }
+}
+
+fn icon_path(path: &str) -> String {
+    let mut rest = path;
+    loop {
+        if let Some(stripped) = rest.strip_prefix("./") {
+            rest = stripped;
+        } else if let Some(stripped) = rest.strip_prefix('/') {
+            rest = stripped;
+        } else {
+            return rest.to_string();
+        }
+    }
+}
+
+fn icon_sizes(entries: &[(String, ArgValue)]) -> Vec<(u32, String)> {
+    let mut sizes: Vec<(u32, String)> = entries
+        .iter()
+        .filter_map(|(size, path)| match path {
+            ArgValue::Str(path) => Some((size.parse().ok()?, icon_path(path))),
+            _ => None,
+        })
+        .collect();
+    sizes.sort_by_key(|(size, _)| *size);
+    sizes
 }
 
 #[derive(Debug)]
@@ -49,66 +153,54 @@ impl MetadataVisitor {
     fn is_oxichrome_attr(attr: &Attribute, name: &str) -> bool {
         let path = attr.path();
         let segments: Vec<_> = path.segments.iter().collect();
-        segments.len() == 2
-            && segments[0].ident == "oxichrome"
-            && segments[1].ident == name
+        segments.len() == 2 && segments[0].ident == "oxichrome" && segments[1].ident == name
     }
 
     fn parse_extension_args(&mut self, attr: &Attribute) {
-        let Ok(nested) = attr.parse_args_with(
-            syn::punctuated::Punctuated::<Meta, syn::Token![,]>::parse_terminated,
+        let Ok(args) = attr.parse_args_with(
+            syn::punctuated::Punctuated::<ExtensionArg, syn::Token![,]>::parse_terminated,
         ) else {
             return;
         };
 
-        for meta in nested {
-            if let Meta::NameValue(MetaNameValue {
-                path,
-                value: Expr::Lit(ExprLit { lit: Lit::Str(s), .. }),
-                ..
-            }) = &meta
-            {
-                if path.is_ident("name") {
-                    self.metadata.name = Some(s.value());
-                } else if path.is_ident("version") {
-                    self.metadata.version = Some(s.value());
-                } else if path.is_ident("description") {
-                    self.metadata.description = Some(s.value());
-                } else if path.is_ident("gecko_id") {
-                    self.metadata.gecko_id = Some(s.value());
+        for arg in args {
+            match (arg.key.as_str(), arg.value) {
+                ("name", ArgValue::Str(value)) => self.metadata.name = Some(value),
+                ("version", ArgValue::Str(value)) => self.metadata.version = Some(value),
+                ("description", ArgValue::Str(value)) => self.metadata.description = Some(value),
+                ("gecko_id", ArgValue::Str(value)) => self.metadata.gecko_id = Some(value),
+                ("permissions", ArgValue::List(values)) => self.metadata.permissions = values,
+                ("host_permissions", ArgValue::List(values)) => {
+                    self.metadata.host_permissions = values
                 }
-            }
-            if let Meta::NameValue(MetaNameValue {
-                path,
-                value,
-                ..
-            }) = &meta
-            {
-                if path.is_ident("permissions") {
-                    if let Expr::Array(arr) = value {
-                        for elem in &arr.elems {
-                            if let Expr::Lit(ExprLit { lit: Lit::Str(s), .. }) = elem {
-                                self.metadata.permissions.push(s.value());
+                ("icons", ArgValue::Map(entries)) => self.metadata.icons = icon_sizes(&entries),
+                ("action", ArgValue::Map(entries)) => {
+                    let mut action = ActionMetadata::default();
+                    for (key, value) in entries {
+                        match (key.as_str(), value) {
+                            ("default_title", ArgValue::Str(title)) => {
+                                action.default_title = Some(title)
                             }
+                            ("default_icon", ArgValue::Str(path)) => {
+                                action.default_icon = Some(ActionIcon::Single(icon_path(&path)))
+                            }
+                            ("default_icon", ArgValue::Map(sizes)) => {
+                                action.default_icon = Some(ActionIcon::Sizes(icon_sizes(&sizes)))
+                            }
+                            _ => {}
                         }
                     }
-                } else if path.is_ident("host_permissions") {
-                    if let Expr::Array(arr) = value {
-                        for elem in &arr.elems {
-                            if let Expr::Lit(ExprLit { lit: Lit::Str(s), .. }) = elem {
-                                self.metadata.host_permissions.push(s.value());
-                            }
-                        }
-                    }
+                    self.metadata.action = Some(action);
                 }
+                _ => {}
             }
         }
     }
 
     fn parse_content_script_args(&self, attr: &Attribute) -> Option<ContentScript> {
-        let nested = attr.parse_args_with(
-            syn::punctuated::Punctuated::<Meta, syn::Token![,]>::parse_terminated,
-        ).ok()?;
+        let nested = attr
+            .parse_args_with(syn::punctuated::Punctuated::<Meta, syn::Token![,]>::parse_terminated)
+            .ok()?;
 
         let mut matches = Vec::new();
         let mut run_at = None;
@@ -120,7 +212,10 @@ impl MetadataVisitor {
                 if path.is_ident("matches") {
                     if let Expr::Array(arr) = value {
                         for elem in &arr.elems {
-                            if let Expr::Lit(ExprLit { lit: Lit::Str(s), .. }) = elem {
+                            if let Expr::Lit(ExprLit {
+                                lit: Lit::Str(s), ..
+                            }) = elem
+                            {
                                 matches.push(s.value());
                             }
                         }
@@ -137,13 +232,19 @@ impl MetadataVisitor {
                         }
                     }
                 } else if path.is_ident("all_frames") {
-                    if let Expr::Lit(ExprLit { lit: Lit::Bool(b), .. }) = value {
+                    if let Expr::Lit(ExprLit {
+                        lit: Lit::Bool(b), ..
+                    }) = value
+                    {
                         all_frames = Some(b.value());
                     }
                 } else if path.is_ident("css") {
                     if let Expr::Array(arr) = value {
                         for elem in &arr.elems {
-                            if let Expr::Lit(ExprLit { lit: Lit::Str(s), .. }) = elem {
+                            if let Expr::Lit(ExprLit {
+                                lit: Lit::Str(s), ..
+                            }) = elem
+                            {
                                 css.push(s.value());
                             }
                         }
@@ -251,6 +352,55 @@ pub fn parse_source_str(source: &str) -> anyhow::Result<ExtensionMetadata> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn test_parse_icons_and_action_with_other_args() {
+        let source = r#"
+            #[oxichrome::extension(
+                name = "Icons",
+                version = "1.2.3",
+                permissions = ["storage"],
+                icons = { 128 = "icons/128.png", 16 = "./icons/16.png" },
+                action = { default_title = "Click", default_icon = { 32 = "/icons/32.png" } },
+                host_permissions = ["https://example.org/*"],
+                gecko_id = "icons@example.com",
+            )]
+            struct Ext;
+        "#;
+        let metadata = parse_source_str(source).unwrap();
+        assert_eq!(metadata.name.as_deref(), Some("Icons"));
+        assert_eq!(metadata.version.as_deref(), Some("1.2.3"));
+        assert_eq!(metadata.permissions, vec!["storage"]);
+        assert_eq!(metadata.host_permissions, vec!["https://example.org/*"]);
+        assert_eq!(metadata.gecko_id.as_deref(), Some("icons@example.com"));
+        assert_eq!(
+            metadata.icons,
+            vec![
+                (16, "icons/16.png".to_string()),
+                (128, "icons/128.png".to_string())
+            ]
+        );
+        assert_eq!(
+            metadata.action,
+            Some(ActionMetadata {
+                default_title: Some("Click".to_string()),
+                default_icon: Some(ActionIcon::Sizes(vec![(32, "icons/32.png".to_string())])),
+            })
+        );
+    }
+
+    #[test]
+    fn test_parse_single_action_icon() {
+        let source = r#"
+            #[oxichrome::extension(name = "A", version = "1.0.0", action = { default_icon = "a.png" })]
+            struct Ext;
+        "#;
+        let metadata = parse_source_str(source).unwrap();
+        assert_eq!(
+            metadata.action.unwrap().default_icon,
+            Some(ActionIcon::Single("a.png".to_string()))
+        );
+        assert!(metadata.icons.is_empty());
+    }
     use super::*;
 
     #[test]
@@ -312,7 +462,10 @@ mod tests {
         assert_eq!(metadata.content_scripts[0].fn_name, "inject");
         assert_eq!(metadata.content_scripts[0].matches, vec!["<all_urls>"]);
         assert_eq!(metadata.content_scripts[1].fn_name, "inject_specific");
-        assert_eq!(metadata.content_scripts[1].matches, vec!["https://example.com/*", "https://test.com/*"]);
+        assert_eq!(
+            metadata.content_scripts[1].matches,
+            vec!["https://example.com/*", "https://test.com/*"]
+        );
     }
 
     #[test]

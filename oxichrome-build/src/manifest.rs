@@ -1,7 +1,8 @@
 use serde::Serialize;
 
+use crate::source_parser::{ActionIcon, ExtensionMetadata};
 use crate::Browser;
-use crate::source_parser::ExtensionMetadata;
+use std::collections::BTreeMap;
 
 #[derive(Serialize)]
 struct Manifest {
@@ -14,6 +15,8 @@ struct Manifest {
     permissions: Vec<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     host_permissions: Vec<String>,
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    icons: BTreeMap<u32, String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     action: Option<Action>,
     background: BackgroundConfig,
@@ -30,6 +33,17 @@ struct Manifest {
 struct Action {
     #[serde(skip_serializing_if = "Option::is_none")]
     default_popup: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    default_title: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    default_icon: Option<DefaultIcon>,
+}
+
+#[derive(Serialize)]
+#[serde(untagged)]
+enum DefaultIcon {
+    Single(String),
+    Sizes(BTreeMap<u32, String>),
 }
 
 #[derive(Serialize)]
@@ -85,14 +99,22 @@ pub fn generate_manifest(metadata: &ExtensionMetadata, browser: Browser) -> anyh
         description: metadata.description.clone(),
         permissions: metadata.permissions.clone(),
         host_permissions: metadata.host_permissions.clone(),
+        icons: metadata.icons.iter().cloned().collect(),
         action: if metadata.has_popup
+            || metadata.action.is_some()
             || metadata
                 .event_handlers
                 .iter()
                 .any(|handler| handler.namespace == "action")
         {
+            let configured = metadata.action.clone().unwrap_or_default();
             Some(Action {
                 default_popup: metadata.has_popup.then(|| "popup.html".to_string()),
+                default_title: configured.default_title,
+                default_icon: configured.default_icon.map(|icon| match icon {
+                    ActionIcon::Single(path) => DefaultIcon::Single(path),
+                    ActionIcon::Sizes(sizes) => DefaultIcon::Sizes(sizes.into_iter().collect()),
+                }),
             })
         } else {
             None
@@ -112,15 +134,17 @@ pub fn generate_manifest(metadata: &ExtensionMetadata, browser: Browser) -> anyh
         } else {
             None
         },
-        content_scripts: metadata.content_scripts.iter().map(|cs| {
-            ContentScriptEntry {
+        content_scripts: metadata
+            .content_scripts
+            .iter()
+            .map(|cs| ContentScriptEntry {
                 matches: cs.matches.clone(),
                 js: vec![format!("content_script_{}.js", cs.fn_name)],
                 run_at: cs.run_at.clone(),
                 all_frames: cs.all_frames,
                 css: cs.css.clone(),
-            }
-        }).collect(),
+            })
+            .collect(),
         web_accessible_resources: vec![WebAccessibleResource {
             resources: vec!["wasm/*".to_string()],
             matches: vec!["<all_urls>".to_string()],
@@ -140,9 +164,10 @@ pub fn generate_manifest(metadata: &ExtensionMetadata, browser: Browser) -> anyh
             }),
         );
 
-        let gecko_id = metadata.gecko_id.clone().unwrap_or_else(|| {
-            format!("{}@oxichrome.dev", name.to_lowercase().replace(' ', "-"))
-        });
+        let gecko_id = metadata
+            .gecko_id
+            .clone()
+            .unwrap_or_else(|| format!("{}@oxichrome.dev", name.to_lowercase().replace(' ', "-")));
         obj.insert(
             "browser_specific_settings".to_string(),
             serde_json::json!({
@@ -160,6 +185,65 @@ pub fn generate_manifest(metadata: &ExtensionMetadata, browser: Browser) -> anyh
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_icons_and_action_in_manifest() {
+        let source = r#"
+            #[oxichrome::extension(
+                name = "Icons", version = "1.0.0",
+                icons = { 128 = "icons/128.png", 16 = "icons/16.png", 48 = "icons/48.png" },
+                action = { default_title = "Focus", default_icon = { 16 = "icons/16.png" } },
+            )]
+            struct Ext;
+
+            #[oxichrome::popup]
+            fn Popup() {}
+        "#;
+        let metadata = crate::source_parser::parse_source_str(source).unwrap();
+        for browser in [Browser::Chromium, Browser::Firefox] {
+            let parsed: serde_json::Value =
+                serde_json::from_str(&generate_manifest(&metadata, browser).unwrap()).unwrap();
+            assert_eq!(
+                parsed["icons"],
+                serde_json::json!({ "16": "icons/16.png", "48": "icons/48.png", "128": "icons/128.png" })
+            );
+            assert_eq!(
+                parsed["action"],
+                serde_json::json!({
+                    "default_popup": "popup.html",
+                    "default_title": "Focus",
+                    "default_icon": { "16": "icons/16.png" }
+                })
+            );
+        }
+    }
+
+    #[test]
+    fn test_action_args_alone_create_the_action() {
+        let source = r#"
+            #[oxichrome::extension(name = "A", version = "1.0.0", action = { default_icon = "a.png" })]
+            struct Ext;
+        "#;
+        let metadata = crate::source_parser::parse_source_str(source).unwrap();
+        let parsed: serde_json::Value =
+            serde_json::from_str(&generate_manifest(&metadata, Browser::Chromium).unwrap())
+                .unwrap();
+        assert_eq!(
+            parsed["action"],
+            serde_json::json!({ "default_icon": "a.png" })
+        );
+        assert!(parsed.get("icons").is_none());
+
+        let source = r#"
+            #[oxichrome::extension(name = "A", version = "1.0.0", action = {})]
+            struct Ext;
+        "#;
+        let metadata = crate::source_parser::parse_source_str(source).unwrap();
+        let parsed: serde_json::Value =
+            serde_json::from_str(&generate_manifest(&metadata, Browser::Chromium).unwrap())
+                .unwrap();
+        assert_eq!(parsed["action"], serde_json::json!({}));
+    }
     use crate::source_parser::EventHandler;
 
     fn test_metadata() -> ExtensionMetadata {
@@ -175,6 +259,8 @@ mod tests {
             has_options_page: true,
             content_scripts: vec![],
             gecko_id: None,
+            icons: vec![],
+            action: None,
         }
     }
 
@@ -208,22 +294,25 @@ mod tests {
             event_handlers: vec![],
             has_popup: false,
             has_options_page: false,
-            content_scripts: vec![
-                ContentScript {
-                    fn_name: "inject".to_string(),
-                    matches: vec!["<all_urls>".to_string()],
-                    run_at: None,
-                    all_frames: None,
-                    css: vec![],
-                },
-            ],
+            content_scripts: vec![ContentScript {
+                fn_name: "inject".to_string(),
+                matches: vec!["<all_urls>".to_string()],
+                run_at: None,
+                all_frames: None,
+                css: vec![],
+            }],
             gecko_id: None,
+            icons: vec![],
+            action: None,
         };
         let json = generate_manifest(&metadata, Browser::Chromium).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
 
         assert_eq!(parsed["content_scripts"][0]["matches"][0], "<all_urls>");
-        assert_eq!(parsed["content_scripts"][0]["js"][0], "content_script_inject.js");
+        assert_eq!(
+            parsed["content_scripts"][0]["js"][0],
+            "content_script_inject.js"
+        );
         assert!(parsed["content_scripts"][0].get("run_at").is_none());
         assert!(parsed["content_scripts"][0].get("all_frames").is_none());
         assert!(parsed["content_scripts"][0].get("css").is_none());
@@ -243,16 +332,16 @@ mod tests {
             event_handlers: vec![],
             has_popup: false,
             has_options_page: false,
-            content_scripts: vec![
-                ContentScript {
-                    fn_name: "inject".to_string(),
-                    matches: vec!["<all_urls>".to_string()],
-                    run_at: Some("document_start".to_string()),
-                    all_frames: Some(true),
-                    css: vec!["styles.css".to_string()],
-                },
-            ],
+            content_scripts: vec![ContentScript {
+                fn_name: "inject".to_string(),
+                matches: vec!["<all_urls>".to_string()],
+                run_at: Some("document_start".to_string()),
+                all_frames: Some(true),
+                css: vec!["styles.css".to_string()],
+            }],
             gecko_id: None,
+            icons: vec![],
+            action: None,
         };
         let json = generate_manifest(&metadata, Browser::Chromium).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
@@ -289,6 +378,8 @@ mod tests {
             version: Some("1.0.0".to_string()),
             description: None,
             gecko_id: None,
+            icons: vec![],
+            action: None,
             permissions: vec!["storage".to_string()],
             host_permissions: vec![
                 "*://developer.mozilla.org/*".to_string(),

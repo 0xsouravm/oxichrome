@@ -311,6 +311,8 @@ mod tests {
             has_options_page: false,
             content_scripts: vec![],
             gecko_id: None,
+            icons: vec![],
+            action: None,
         };
 
         let js = generate_background_js(&metadata, "counter-extension");
@@ -345,6 +347,8 @@ mod tests {
             has_options_page: false,
             content_scripts: vec![],
             gecko_id: None,
+            icons: vec![],
+            action: None,
         }
     }
 

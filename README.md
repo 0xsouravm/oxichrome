@@ -120,12 +120,18 @@ Defines extension metadata. Applied to a struct.
     description = "Optional description",
     permissions = ["storage", "tabs"],
     host_permissions = ["https://example.org/*", "*://*.example.com/*"], // optional
+    icons = { 16 = "icons/16.png", 48 = "icons/48.png", 128 = "icons/128.png" }, // optional
+    action = { default_title = "My Extension", default_icon = "icons/32.png" }, // optional
     gecko_id = "my-extension@example.com" // optional, Firefox only
 )]
 struct MyExtension;
 ```
 
 `host_permissions` lists the [match patterns](https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/Match_patterns) your extension can access, and is written to `host_permissions` in the manifest for both Chromium and Firefox. The key is left out of the manifest when the list is empty. Malformed patterns are compile errors.
+
+`icons` are the extension's icons, by size in pixels. Browsers use them on the extensions page and in stores; the Chrome Web Store needs a 128 pixel icon. `action` sets the toolbar button: `default_title` is its tooltip and `default_icon` takes one path or sizes like `icons`. Without `default_icon` the toolbar uses `icons`. Giving `action` (even `action = {}`) adds the toolbar button when you have no popup or `on_clicked` handler, which `chrome.action` calls need. The popup always comes from `#[oxichrome::popup]`.
+
+Icon paths are relative to `static/` (a leading `/` or `./` is fine). Each must be a PNG file that exists, spelled with the same upper and lower case as on disk, and sizes are whole numbers from 1 to 2048. Anything else is a compile error: Chrome refuses to load an extension with a missing icon, Firefox quietly shows a blank one, and Chrome shows a broken file or an SVG as a blank icon. Changing or deleting an icon rebuilds and re-checks it.
 
 `gecko_id` sets the add-on ID in the Firefox manifest (`browser_specific_settings.gecko.id`). Chromium builds ignore it. If you leave it out, the ID is generated from the extension name, for example `my-extension@oxichrome.dev`.
 

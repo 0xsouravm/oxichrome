@@ -1,5 +1,5 @@
 use syn::parse::{Parse, ParseStream};
-use syn::{Ident, LitBool, LitStr, Token};
+use syn::{Ident, LitBool, LitInt, LitStr, Token};
 
 /// See <https://developer.chrome.com/docs/extensions/develop/concepts/match-patterns>
 /// and <https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/Match_patterns>.
@@ -154,6 +154,177 @@ pub struct ExtensionArgs {
     pub description: Option<LitStr>,
     pub permissions: Vec<LitStr>,
     pub host_permissions: Vec<LitStr>,
+    pub icons: Vec<(u32, LitStr)>,
+    pub action: Option<ActionArgs>,
+}
+
+#[derive(Debug)]
+pub struct ActionArgs {
+    pub default_title: Option<LitStr>,
+    pub default_icon: Option<IconSpec>,
+}
+
+#[derive(Debug)]
+pub enum IconSpec {
+    Single(LitStr),
+    Sizes(Vec<(u32, LitStr)>),
+}
+
+impl IconSpec {
+    pub fn paths(&self) -> Vec<&LitStr> {
+        match self {
+            IconSpec::Single(path) => vec![path],
+            IconSpec::Sizes(sizes) => sizes.iter().map(|(_, path)| path).collect(),
+        }
+    }
+}
+
+pub const MAX_ICON_SIZE: u32 = 2048;
+
+fn parse_icon_size(lit: &LitInt) -> syn::Result<u32> {
+    let text = lit.to_string();
+    let fail = || {
+        syn::Error::new(
+            lit.span(),
+            format!("invalid icon size `{text}`: use a whole number of pixels from 1 to {MAX_ICON_SIZE}, such as `16` or `128`"),
+        )
+    };
+    if !lit.suffix().is_empty()
+        || text.starts_with('0')
+        || !text.bytes().all(|b| b.is_ascii_digit())
+    {
+        return Err(fail());
+    }
+    let size: u32 = lit.base10_parse().map_err(|_| fail())?;
+    if !(1..=MAX_ICON_SIZE).contains(&size) {
+        return Err(fail());
+    }
+    Ok(size)
+}
+
+fn parse_icon_map(input: ParseStream) -> syn::Result<Vec<(u32, LitStr)>> {
+    let content;
+    syn::braced!(content in input);
+    let mut sizes: Vec<(u32, LitStr)> = Vec::new();
+    while !content.is_empty() {
+        if content.peek(LitStr) {
+            let key: LitStr = content.parse()?;
+            return Err(syn::Error::new(
+                key.span(),
+                format!(
+                    "write the icon size as a number: `{} = \"...\"`",
+                    key.value()
+                ),
+            ));
+        }
+        let key: LitInt = content.parse()?;
+        let size = parse_icon_size(&key)?;
+        content.parse::<Token![=]>()?;
+        let path: LitStr = content.parse()?;
+        normalize_icon_path(&path)?;
+        if sizes.iter().any(|(existing, _)| *existing == size) {
+            return Err(syn::Error::new(
+                key.span(),
+                format!("icon size {size} is listed twice"),
+            ));
+        }
+        sizes.push((size, path));
+        if !content.is_empty() {
+            content.parse::<Token![,]>()?;
+        }
+    }
+    sizes.sort_by_key(|(size, _)| *size);
+    Ok(sizes)
+}
+
+fn parse_action(input: ParseStream) -> syn::Result<ActionArgs> {
+    let content;
+    syn::braced!(content in input);
+    let mut action = ActionArgs {
+        default_title: None,
+        default_icon: None,
+    };
+    while !content.is_empty() {
+        let key: Ident = content.parse()?;
+        content.parse::<Token![=]>()?;
+        match key.to_string().as_str() {
+            "default_title" => action.default_title = Some(content.parse()?),
+            "default_icon" => {
+                action.default_icon = Some(if content.peek(LitStr) {
+                    let path: LitStr = content.parse()?;
+                    normalize_icon_path(&path)?;
+                    IconSpec::Single(path)
+                } else {
+                    IconSpec::Sizes(parse_icon_map(&content)?)
+                });
+            }
+            "default_popup" => return Err(syn::Error::new(
+                key.span(),
+                "the popup comes from your `#[oxichrome::popup]` component; remove `default_popup`",
+            )),
+            other => return Err(syn::Error::new(
+                key.span(),
+                format!(
+                    "unknown action argument `{other}`; expected `default_title` or `default_icon`"
+                ),
+            )),
+        }
+        if !content.is_empty() {
+            content.parse::<Token![,]>()?;
+        }
+    }
+    Ok(action)
+}
+
+pub fn normalize_icon_path(path: &LitStr) -> syn::Result<String> {
+    let value = path.value();
+    let fail = |reason: &str| {
+        Err(syn::Error::new(
+            path.span(),
+            format!("invalid icon path `{value}`: {reason}"),
+        ))
+    };
+    if value.contains("://") || value.starts_with("data:") {
+        return fail("use a PNG file inside `static/`, not a URL");
+    }
+    if value.contains('\\') {
+        return fail("use `/` to separate folders");
+    }
+    let mut rest = value.as_str();
+    loop {
+        if let Some(stripped) = rest.strip_prefix("./") {
+            rest = stripped;
+        } else if let Some(stripped) = rest.strip_prefix('/') {
+            rest = stripped;
+        } else {
+            break;
+        }
+    }
+    if rest.is_empty() {
+        return fail("the path is empty");
+    }
+    if rest
+        .split('/')
+        .any(|segment| segment.is_empty() || segment == "." || segment == "..")
+    {
+        return fail(
+            "the path must stay inside `static/` and can't contain empty, `.` or `..` parts",
+        );
+    }
+    if !rest.to_ascii_lowercase().ends_with(".png") {
+        return fail("icons must be PNG files; Chrome can't show SVG or WebP icons");
+    }
+    Ok(rest.to_string())
+}
+
+pub fn png_dimensions(bytes: &[u8]) -> Option<(u32, u32)> {
+    const SIGNATURE: &[u8] = b"\x89PNG\r\n\x1a\n";
+    if bytes.len() < 24 || !bytes.starts_with(SIGNATURE) || &bytes[12..16] != b"IHDR" {
+        return None;
+    }
+    let width = u32::from_be_bytes(bytes[16..20].try_into().ok()?);
+    let height = u32::from_be_bytes(bytes[20..24].try_into().ok()?);
+    (width > 0 && height > 0).then_some((width, height))
 }
 
 impl Parse for ExtensionArgs {
@@ -163,6 +334,8 @@ impl Parse for ExtensionArgs {
         let mut description: Option<LitStr> = None;
         let mut permissions: Vec<LitStr> = Vec::new();
         let mut host_permissions: Vec<LitStr> = Vec::new();
+        let mut icons: Vec<(u32, LitStr)> = Vec::new();
+        let mut action: Option<ActionArgs> = None;
 
         while !input.is_empty() {
             let key: Ident = input.parse()?;
@@ -206,6 +379,12 @@ impl Parse for ExtensionArgs {
                         }
                     }
                 }
+                "icons" => {
+                    icons = parse_icon_map(input)?;
+                }
+                "action" => {
+                    action = Some(parse_action(input)?);
+                }
                 other => {
                     return Err(syn::Error::new(
                         key.span(),
@@ -238,6 +417,8 @@ impl Parse for ExtensionArgs {
             description,
             permissions,
             host_permissions,
+            icons,
+            action,
         })
     }
 }
@@ -345,6 +526,99 @@ impl Parse for ContentScriptArgs {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn extension(tokens: proc_macro2::TokenStream) -> syn::Result<ExtensionArgs> {
+        syn::parse2::<ExtensionArgs>(quote::quote! { name = "T", version = "1.0.0", #tokens })
+    }
+
+    #[test]
+    fn icon_sizes_follow_both_browsers() {
+        let args =
+            extension(quote::quote! { icons = { 128 = "b.png", 16 = "a.png", 2048 = "c.png" } })
+                .unwrap();
+        let sizes: Vec<u32> = args.icons.iter().map(|(size, _)| *size).collect();
+        assert_eq!(sizes, vec![16, 128, 2048]);
+        for bad in ["0", "2049", "016", "16u32", "99999"] {
+            let size: proc_macro2::TokenStream = bad.parse().unwrap();
+            let err = extension(quote::quote! { icons = { #size = "a.png" } }).expect_err(bad);
+            assert!(
+                err.to_string().contains("invalid icon size"),
+                "{bad}: {err}"
+            );
+        }
+        let err = extension(quote::quote! { icons = { "16" = "a.png" } }).unwrap_err();
+        assert!(
+            err.to_string().contains("write the icon size as a number"),
+            "{err}"
+        );
+        let err = extension(quote::quote! { icons = { 16 = "a.png", 16 = "b.png" } }).unwrap_err();
+        assert!(err.to_string().contains("listed twice"), "{err}");
+    }
+
+    #[test]
+    fn icon_paths_stay_inside_static() {
+        let lit = |value: &str| LitStr::new(value, proc_macro2::Span::call_site());
+        for (input, expected) in [
+            ("a.png", "a.png"),
+            ("/a.png", "a.png"),
+            ("./icons/a.png", "icons/a.png"),
+            ("icons/A.PNG", "icons/A.PNG"),
+        ] {
+            assert_eq!(normalize_icon_path(&lit(input)).unwrap(), expected);
+        }
+        for bad in [
+            "",
+            "/",
+            "../a.png",
+            "icons/../a.png",
+            "icons//a.png",
+            "icons\\a.png",
+            "https://example.org/a.png",
+            "data:image/png;base64,AA",
+            "a.svg",
+            "a.webp",
+            "a",
+        ] {
+            assert!(normalize_icon_path(&lit(bad)).is_err(), "{bad}");
+        }
+    }
+
+    #[test]
+    fn png_dimensions_reads_the_header() {
+        let mut png = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR".to_vec();
+        png.extend_from_slice(&16u32.to_be_bytes());
+        png.extend_from_slice(&32u32.to_be_bytes());
+        assert_eq!(png_dimensions(&png), Some((16, 32)));
+        assert_eq!(png_dimensions(b"not an image at all, not a png"), None);
+        let mut zero = png.clone();
+        zero[16..20].copy_from_slice(&0u32.to_be_bytes());
+        assert_eq!(png_dimensions(&zero), None);
+        assert_eq!(png_dimensions(&png[..20]), None);
+    }
+
+    #[test]
+    fn action_args_are_checked() {
+        let args =
+            extension(quote::quote! { action = { default_title = "Hi", default_icon = "a.png" } })
+                .unwrap();
+        let action = args.action.unwrap();
+        assert_eq!(action.default_title.unwrap().value(), "Hi");
+        assert!(matches!(action.default_icon, Some(IconSpec::Single(_))));
+        assert!(extension(quote::quote! { action = {} })
+            .unwrap()
+            .action
+            .is_some());
+        let err = extension(quote::quote! { action = { default_popup = "p.html" } }).unwrap_err();
+        assert!(err.to_string().contains("#[oxichrome::popup]"), "{err}");
+        let err = extension(quote::quote! { action = { colour = "red" } }).unwrap_err();
+        assert!(
+            err.to_string().contains("unknown action argument `colour`"),
+            "{err}"
+        );
+        let err =
+            extension(quote::quote! { action = { default_icon = { 16 = "a.svg" } } }).unwrap_err();
+        assert!(err.to_string().contains("must be PNG"), "{err}");
+    }
 
     #[test]
     fn parse_extension_args() {
