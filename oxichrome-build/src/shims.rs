@@ -421,6 +421,7 @@ pub fn generate_popup_html() -> String {
 <html>
 <head>
 <meta charset="UTF-8">
+<meta name="color-scheme" content="light dark">
 <style>html, body { margin: 0; padding: 0; min-width: 240px; min-height: 120px; }</style>
 </head>
 <body>
@@ -454,6 +455,7 @@ pub fn generate_side_panel_html() -> String {
 <html>
 <head>
 <meta charset="UTF-8">
+<meta name="color-scheme" content="light dark">
 <style>html, body { margin: 0; padding: 0; }</style>
 </head>
 <body>
@@ -487,6 +489,7 @@ pub fn generate_options_html() -> String {
 <html>
 <head>
 <meta charset="UTF-8">
+<meta name="color-scheme" content="light dark">
 <style>html, body { margin: 0; padding: 0; }</style>
 </head>
 <body>
@@ -875,5 +878,12 @@ mod tests {
         );
         assert!(generate_side_panel_js("my-ext").contains("import init, { __oxichrome_mount_side_panel } from './wasm/my_ext.js'"));
         assert!(generate_side_panel_html().contains("src=\"sidepanel.js\""));
+    }
+
+    #[test]
+    fn pages_follow_the_browser_theme() {
+        for html in [generate_popup_html(), generate_options_html(), generate_side_panel_html()] {
+            assert!(html.contains(r#"<meta name="color-scheme" content="light dark">"#), "{html}");
+        }
     }
 }
