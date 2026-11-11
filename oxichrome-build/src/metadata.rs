@@ -482,7 +482,22 @@ pub fn parse_entries(text: &str) -> anyhow::Result<ExtensionMetadata> {
         .sort_by(|a, b| (&a.fn_name, &a.export).cmp(&(&b.fn_name, &b.export)));
     check_side_panel(&metadata)?;
     check_omnibox(&metadata)?;
+    check_downloads(&metadata)?;
     Ok(metadata)
+}
+
+fn check_downloads(metadata: &ExtensionMetadata) -> anyhow::Result<()> {
+    let listed = metadata.permissions.iter().chain(&metadata.optional_permissions).any(|permission| permission == "downloads");
+    if let Some(handler) = metadata.event_handlers.iter().find(|handler| handler.namespace == "downloads") {
+        if !listed {
+            bail!(
+                "`{}` listens to `downloads::{}`; add `Downloads` to `permissions` in #[oxichrome::extension]",
+                handler.fn_name,
+                handler.event_name
+            );
+        }
+    }
+    Ok(())
 }
 
 fn check_omnibox(metadata: &ExtensionMetadata) -> anyhow::Result<()> {

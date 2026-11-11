@@ -613,6 +613,15 @@ windows::update(window.id, WindowUpdate::new().size(500, 400).draw_attention(tru
 let current = windows::current_with_tabs().await?;   // also get, get_with_tabs, last_focused, get_all, get_all_with_tabs
 windows::remove(window.id).await?;
 
+// Downloads (requires the "downloads" permission)
+use oxichrome::downloads::{self, Conflict, Query, Request, Save, State};
+let id = downloads::download(Request::new("https://example.com/report.pdf").filename("reports/may.pdf")).await?;
+downloads::download(Request::new("https://api.example.com/export").header("X-Api-Key", key).post(body)).await?;
+downloads::save(Save::text("notes.txt", text).on_conflict(Conflict::Overwrite)).await?; // content you made
+downloads::save(Save::bytes("photo.png", png_bytes)).await?;                          // MIME type from the name, or .mime(...)
+let d = downloads::get(id).await?;                                                    // d.state, d.bytes_received, d.filename, ...
+let paused = downloads::search(Query::new().text("report").state(State::Paused).limit(10)).await?;
+downloads::pause(id).await?;   // also resume, cancel, erase, erase_matching, remove_file, file_icon
 // Runtime
 let url = oxichrome::runtime::get_url("icon.png");
 oxichrome::runtime::send_message(&msg).await?;
@@ -671,6 +680,31 @@ async fn focus(window_id: Option<i32>) {} // None when no browser window has foc
 #[oxichrome::on(windows::on_bounds_changed)]
 async fn resized(window: Window) {} // Chrome only; the Firefox build says it never runs there
 ```
+
+A `Download` reads the same in both browsers: `state` is `InProgress`, `Paused`, `Complete` or `Interrupted`, with the reason in `error` (`ServerBadContent` for a 404, `UserCanceled`, ...). Firefox reports a paused download as interrupted; oxichrome shows it as `Paused`. `final_url` and `end_time` are Chrome only. In Firefox, `exists` can stay `true` after `remove_file` until the browser checks the folder again.
+
+Each browser refuses different things, so oxichrome refuses the union before anything starts, with a reason. A request must be an `http` or `https` URL. A file name must stay inside the downloads folder: no absolute paths, no `..`, `.` or empty folders, no names starting with a dot or ending with a dot or space, no `\ : * ? " < > |`, no Windows reserved names like `con`, nothing ending in `.lnk`, and at most 255 bytes per part. Headers the browser sets itself (`Cookie`, `Referer`, `User-Agent`, `Origin`, `Sec-*`, ...) are refused, and so are header names with spaces and values with line breaks. `post(body)` sends a POST, since both browsers drop a body on GET. Without a `filename`, Chrome uses the server's suggested name and Firefox uses the last part of the URL, so pass one when the name matters. Chrome may also change the extension to match the file type (`run.exe` served as text becomes `run.txt`).
+
+`save` writes bytes you made into a file. Chrome needs a `data:` URL and Firefox a `blob:` URL that must live until the download ends, so oxichrome picks the right one and, in Firefox, hands the work to the background page so the download survives the popup closing. Tested to 30 MB.
+
+`pause` and `cancel` on a finished download behave the same way everywhere: pausing explains why it can't, cancelling does nothing. Every call on an id that doesn't exist returns `InvalidArgument`, while Chrome would often succeed silently. Firefox can only resume when the server supports range requests; otherwise `resume` says the download stopped. Uniquified names differ: `report (1).pdf` in Chrome, `report(1).pdf` in Firefox. `Query::without` filters in oxichrome, because neither browser's `-word` search works.
+
+`ask_where_to_save()` opens the save dialog. `show` and `show_default_folder` reveal files in the system's file manager. Opening a downloaded file needs `DownloadsOpen` and a real click, so it comes as a click handler like the side panel's:
+
+```rust
+#[oxichrome::on(downloads::on_created)]
+async fn created(download: Download) {}
+
+#[oxichrome::on(downloads::on_changed)]
+async fn changed(download: Download) {} // the whole download after it changes, once per change
+
+#[oxichrome::on(downloads::on_erased)]
+async fn erased(id: i32) {}
+
+view! { <button on:click=downloads::open_on_click(id, |result| async move { /* Err if it couldn't open */ })>"Open"</button> }
+```
+
+Browsers send `on_changed` as a list of fields that changed, in different shapes, and Firefox cancels by passing through a state that looks paused. oxichrome waits for a change to settle (200 ms) and sends the whole `Download`, so each handler sees the state it ended in. Listening to a downloads event without `Downloads` in `permissions` is a build error.
 
 `chrome.action` needs `action` in the manifest. oxichrome adds it when your extension has a `#[popup]` or an `#[on(action::on_clicked)]` handler. The click event doesn't fire while a popup is set.
 

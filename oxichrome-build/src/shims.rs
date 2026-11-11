@@ -22,7 +22,7 @@ globalThis.__oxichrome_notification_cleared = (id) => {
 };
 
 chrome.runtime.onMessage.addListener((message) => {
-    if (isInternalMessage(message)) {
+    if (isInternalMessage(message) && typeof message.__oxichrome_notification_cleared === 'string') {
         clearedNotifications.add(message.__oxichrome_notification_cleared);
         return Promise.resolve(true);
     }
@@ -360,6 +360,39 @@ self.addEventListener('unhandledrejection', (event) => releaseRepliesOnTrap(even
 }});
 "#
             ));
+        } else if event == "chrome.downloads.onChanged" {
+            listeners.push_str(&format!(
+                r#"const downloadsSeen = new Map();
+const downloadsSettling = new Map();
+
+chrome.downloads.onErased.addListener((id) => {{
+    downloadsSeen.delete(id);
+    clearTimeout(downloadsSettling.get(id));
+    downloadsSettling.delete(id);
+}});
+
+{event}.addListener((delta) => {{
+    clearTimeout(downloadsSettling.get(delta.id));
+    downloadsSettling.set(delta.id, setTimeout(() => {{
+        downloadsSettling.delete(delta.id);
+        dispatch(() => {{
+            chrome.downloads.search({{ id: delta.id }}).then(([item]) => {{
+                if (!item) {{
+                    return;
+                }}
+                const {{ bytesReceived, estimatedEndTime, ...rest }} = item;
+                const key = JSON.stringify(rest);
+                if (downloadsSeen.get(item.id) === key) {{
+                    return;
+                }}
+                downloadsSeen.set(item.id, key);
+                [{handlers}].forEach((handler) => handler(item));
+            }});
+        }});
+    }}, 200));
+}});
+"#
+            ));
         } else if event == "chrome.windows.onFocusChanged" {
             listeners.push_str(&format!(
                 r#"{event}.addListener((id) => {{
@@ -430,7 +463,8 @@ function isInternalMessage(message) {{
     return (
         message !== null &&
         typeof message === 'object' &&
-        typeof message.__oxichrome_notification_cleared === 'string'
+        (typeof message.__oxichrome_notification_cleared === 'string' ||
+            typeof message.__oxichrome_download_save === 'object')
     );
 }}
 
@@ -936,6 +970,17 @@ mod tests {
         );
         assert!(generate_side_panel_js("my-ext").contains("import init, { __oxichrome_mount_side_panel } from './wasm/my_ext.js'"));
         assert!(generate_side_panel_html(&[]).contains("src=\"sidepanel.js\""));
+    }
+
+    #[test]
+    fn download_changes_send_the_settled_download_once() {
+        let metadata = metadata_with_handlers(&[("changed", "downloads", "on_changed")]);
+        let js = generate_background_js(&metadata, "test");
+        assert_eq!(js.matches("chrome.downloads.onChanged.addListener").count(), 1);
+        assert!(js.contains("chrome.downloads.search({ id: delta.id })"));
+        assert!(js.contains("}, 200));"));
+        assert!(js.contains("[__oxichrome_on_changed].forEach((handler) => handler(item))"));
+        assert!(js.contains("typeof message.__oxichrome_download_save === 'object'"));
     }
 
     #[test]

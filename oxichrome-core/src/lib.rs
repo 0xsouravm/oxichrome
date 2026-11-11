@@ -3,6 +3,7 @@ pub mod alarms;
 pub mod commands;
 pub mod context_menus;
 pub mod content_script;
+pub mod downloads;
 pub mod error;
 pub mod event;
 pub mod i18n;

@@ -601,3 +601,158 @@ extern "C" {
     #[wasm_bindgen(js_name = on_omnibox_cancelled)]
     pub fn chrome_omnibox_on_input_cancelled_add_listener(callback: &Closure<dyn FnMut(JsValue)>);
 }
+
+#[wasm_bindgen(inline_js = r#"
+function api() {
+    const downloads = globalThis.chrome?.downloads;
+    if (!downloads) {
+        throw new Error('oxichrome:no-permission');
+    }
+    return downloads;
+}
+
+function firefox() {
+    return typeof globalThis.browser?.runtime?.getBrowserInfo === 'function';
+}
+
+function base64(bytes) {
+    if (typeof bytes.toBase64 === 'function') {
+        return bytes.toBase64();
+    }
+    let text = '';
+    for (let i = 0; i < bytes.length; i += 0x8000) {
+        text += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+    }
+    return btoa(text);
+}
+
+const blobs = new Map();
+let watching = false;
+
+function release(id) {
+    const url = blobs.get(id);
+    if (url) {
+        blobs.delete(id);
+        URL.revokeObjectURL(url);
+    }
+}
+
+function settle(id) {
+    api().search({ id }).then(([item]) => {
+        if (!item || item.state === 'complete' || (item.state === 'interrupted' && !item.paused)) {
+            release(id);
+        }
+    }, () => release(id));
+}
+
+function watch() {
+    if (watching) {
+        return;
+    }
+    watching = true;
+    api().onChanged.addListener((delta) => {
+        if (blobs.has(delta.id) && delta.state && delta.state.current !== 'in_progress') {
+            settle(delta.id);
+        }
+    });
+    api().onErased.addListener(release);
+}
+
+function saveHere(save) {
+    const url = URL.createObjectURL(new Blob([save.bytes], { type: save.mime }));
+    watch();
+    return api()
+        .download({ url, filename: save.filename, conflictAction: save.conflictAction, saveAs: save.saveAs })
+        .then((id) => {
+            blobs.set(id, url);
+            settle(id);
+            return id;
+        }, (error) => {
+            URL.revokeObjectURL(url);
+            throw error;
+        });
+}
+
+function isBackground() {
+    try {
+        return globalThis.browser?.extension?.getBackgroundPage?.() === globalThis;
+    } catch (error) {
+        return false;
+    }
+}
+
+if (firefox() && isBackground()) {
+    browser.runtime.onMessage.addListener((message) => {
+        const save = message && typeof message === 'object' ? message.__oxichrome_download_save : undefined;
+        if (!save || typeof save !== 'object') {
+            return undefined;
+        }
+        return saveHere(save).then((id) => ({ id }), (error) => ({ error: String(error?.message ?? error) }));
+    });
+}
+
+export function downloads_call(method, args) {
+    return Promise.resolve(api()[method](...args));
+}
+
+export function downloads_save(filename, bytes, mime, conflictAction, saveAs) {
+    const save = { filename, bytes, mime, conflictAction: conflictAction ?? undefined, saveAs };
+    if (!firefox()) {
+        return api().download({ url: 'data:' + mime + ';base64,' + base64(bytes), filename, conflictAction: save.conflictAction, saveAs });
+    }
+    api();
+    if (isBackground() || !chrome.runtime.getManifest().background) {
+        return saveHere(save);
+    }
+    return browser.runtime.sendMessage({ __oxichrome_download_save: save }).then((reply) => {
+        if (reply && typeof reply.id === 'number') {
+            return reply.id;
+        }
+        throw new Error(reply?.error ?? 'the background page did not answer');
+    }, (error) => {
+        if (String(error?.message ?? error).includes('Receiving end does not exist')) {
+            return saveHere(save);
+        }
+        throw error;
+    });
+}
+
+export function downloads_open(id) {
+    const downloads = api();
+    if (typeof downloads.open !== 'function') {
+        throw new Error('oxichrome:no-open-permission');
+    }
+    return Promise.resolve(downloads.open(id));
+}
+
+export function on_downloads_created(callback) {
+    globalThis.chrome?.downloads?.onCreated.addListener(callback);
+}
+
+export function on_downloads_changed(callback) {
+    globalThis.chrome?.downloads?.onChanged.addListener(callback);
+}
+
+export function on_downloads_erased(callback) {
+    globalThis.chrome?.downloads?.onErased.addListener(callback);
+}
+"#)]
+extern "C" {
+    #[wasm_bindgen(catch)]
+    pub fn downloads_call(method: &str, args: &js_sys::Array) -> Result<js_sys::Promise, JsValue>;
+
+    #[wasm_bindgen(catch)]
+    pub fn downloads_save(filename: &str, bytes: Vec<u8>, mime: &str, conflict_action: Option<&str>, save_as: bool) -> Result<js_sys::Promise, JsValue>;
+
+    #[wasm_bindgen(catch)]
+    pub fn downloads_open(id: i32) -> Result<js_sys::Promise, JsValue>;
+
+    #[wasm_bindgen(js_name = on_downloads_created)]
+    pub fn chrome_downloads_on_created_add_listener(callback: &Closure<dyn FnMut(JsValue)>);
+
+    #[wasm_bindgen(js_name = on_downloads_changed)]
+    pub fn chrome_downloads_on_changed_add_listener(callback: &Closure<dyn FnMut(JsValue)>);
+
+    #[wasm_bindgen(js_name = on_downloads_erased)]
+    pub fn chrome_downloads_on_erased_add_listener(callback: &Closure<dyn FnMut(JsValue)>);
+}

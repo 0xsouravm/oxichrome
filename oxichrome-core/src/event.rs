@@ -109,6 +109,9 @@ pub mod events {
     pub struct OmniboxOnInputChanged;
     pub struct OmniboxOnInputEntered;
     pub struct OmniboxOnInputCancelled;
+    pub struct DownloadsOnCreated;
+    pub struct DownloadsOnChanged;
+    pub struct DownloadsOnErased;
 }
 
 macro_rules! arity {
@@ -145,6 +148,9 @@ arity! {
     OmniboxOnInputChanged = 1,
     OmniboxOnInputEntered = 2,
     OmniboxOnInputCancelled = 0,
+    DownloadsOnCreated = 1,
+    DownloadsOnChanged = 1,
+    DownloadsOnErased = 1,
 }
 
 impl EventArg<events::NotificationsOnClicked, 1> for String {}
