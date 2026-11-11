@@ -173,6 +173,9 @@ pub fn generate_manifest(metadata: &ExtensionMetadata, browser: Browser) -> anyh
             if !metadata.menus.is_empty() && !permissions.iter().any(|p| p == "contextMenus") {
                 permissions.push("contextMenus".to_string());
             }
+            if metadata.event_handlers.iter().any(|handler| handler.namespace == "idle") && !permissions.iter().any(|p| p == "storage") {
+                permissions.push("storage".to_string());
+            }
             if metadata.side_panel.is_some() && browser == Browser::Chromium && !permissions.iter().any(|p| p == "sidePanel") {
                 permissions.push("sidePanel".to_string());
             }

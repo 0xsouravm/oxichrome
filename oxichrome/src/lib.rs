@@ -11,6 +11,7 @@ pub use oxichrome_core::context_menus;
 pub use oxichrome_core::cookies;
 pub use oxichrome_core::event;
 pub use oxichrome_core::i18n;
+pub use oxichrome_core::idle;
 pub use oxichrome_core::downloads;
 pub use oxichrome_core::notifications;
 pub use oxichrome_core::omnibox;

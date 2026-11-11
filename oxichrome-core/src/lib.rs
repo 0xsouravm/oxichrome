@@ -8,6 +8,7 @@ pub mod downloads;
 pub mod error;
 pub mod event;
 pub mod i18n;
+pub mod idle;
 pub mod js_bridge;
 mod json;
 pub mod notifications;

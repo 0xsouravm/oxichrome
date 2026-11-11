@@ -482,36 +482,33 @@ pub fn parse_entries(text: &str) -> anyhow::Result<ExtensionMetadata> {
         .sort_by(|a, b| (&a.fn_name, &a.export).cmp(&(&b.fn_name, &b.export)));
     check_side_panel(&metadata)?;
     check_omnibox(&metadata)?;
-    check_downloads(&metadata)?;
+    check_event_permissions(&metadata)?;
     check_cookies(&metadata)?;
     Ok(metadata)
 }
 
-fn check_downloads(metadata: &ExtensionMetadata) -> anyhow::Result<()> {
-    let listed = metadata.permissions.iter().chain(&metadata.optional_permissions).any(|permission| permission == "downloads");
-    if let Some(handler) = metadata.event_handlers.iter().find(|handler| handler.namespace == "downloads") {
+fn check_event_permission(metadata: &ExtensionMetadata, namespace: &str, permission: &str, variant: &str) -> anyhow::Result<bool> {
+    let listed = metadata.permissions.iter().chain(&metadata.optional_permissions).any(|listed| listed == permission);
+    if let Some(handler) = metadata.event_handlers.iter().find(|handler| handler.namespace == namespace) {
         if !listed {
             bail!(
-                "`{}` listens to `downloads::{}`; add `Downloads` to `permissions` in #[oxichrome::extension]",
+                "`{}` listens to `{namespace}::{}`; add `{variant}` to `permissions` in #[oxichrome::extension]",
                 handler.fn_name,
                 handler.event_name
             );
         }
     }
+    Ok(listed)
+}
+
+fn check_event_permissions(metadata: &ExtensionMetadata) -> anyhow::Result<()> {
+    check_event_permission(metadata, "downloads", "downloads", "Downloads")?;
+    check_event_permission(metadata, "idle", "idle", "Idle")?;
     Ok(())
 }
 
 fn check_cookies(metadata: &ExtensionMetadata) -> anyhow::Result<()> {
-    let listed = metadata.permissions.iter().chain(&metadata.optional_permissions).any(|permission| permission == "cookies");
-    if let Some(handler) = metadata.event_handlers.iter().find(|handler| handler.namespace == "cookies") {
-        if !listed {
-            bail!(
-                "`{}` listens to `cookies::{}`; add `Cookies` to `permissions` in #[oxichrome::extension]",
-                handler.fn_name,
-                handler.event_name
-            );
-        }
-    }
+    let listed = check_event_permission(metadata, "cookies", "cookies", "Cookies")?;
     if listed && metadata.host_permissions.is_empty() && metadata.optional_host_permissions.is_empty() {
         bail!("`Cookies` only reaches sites the extension has host permission for; add them to `host_permissions` in #[oxichrome::extension], like `\"https://example.com/*\"`");
     }

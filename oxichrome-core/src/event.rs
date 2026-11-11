@@ -113,6 +113,7 @@ pub mod events {
     pub struct DownloadsOnChanged;
     pub struct DownloadsOnErased;
     pub struct CookiesOnChanged;
+    pub struct IdleOnStateChanged;
 }
 
 macro_rules! arity {
@@ -153,6 +154,7 @@ arity! {
     DownloadsOnChanged = 1,
     DownloadsOnErased = 1,
     CookiesOnChanged = 1,
+    IdleOnStateChanged = 1,
 }
 
 impl EventArg<events::NotificationsOnClicked, 1> for String {}

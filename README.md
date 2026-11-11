@@ -631,6 +631,11 @@ let c = cookies::get("https://example.com/", "theme").await?;                   
 let all = cookies::all(Query::new().domain("example.com")).await?;                   // also url, name, path, secure, session, store
 let gone = cookies::remove("https://example.com/", "theme").await?;                   // Some(cookie) if one was removed
 cookies::remove_all(Query::new().domain("example.com")).await?;                       // also remove_cookie(&cookie), stores()
+
+// Idle (requires the "idle" permission)
+use oxichrome::idle::{self, State};
+let state: State = idle::state(Duration::from_secs(300)).await?;   // Active, Idle (no input for 5 minutes) or Locked
+idle::set_detection_interval(Duration::from_secs(120)).await?;      // when on_state_changed reports Idle (default 60 s)
 // Runtime
 let url = oxichrome::runtime::get_url("icon.png");
 oxichrome::runtime::send_message(&msg).await?;
@@ -732,6 +737,15 @@ async fn changed(change: Change) {
 ```
 
 Overwriting a cookie sends one `Set`, not a removal and then a set (Firefox's removal even carries the new value). A cookie that runs out sends `Removed` with `Expired` in Chrome; Firefox sends nothing. Listening to `cookies::on_changed` without `Cookies` in `permissions`, or having `Cookies` without any host permissions, is a build error.
+
+Idle intervals are whole seconds from 15 seconds (`idle::MIN_INTERVAL`) to `idle::MAX_INTERVAL`; anything else returns `InvalidArgument` in both browsers, where Firefox would accept a value Chrome refuses. `Locked` comes from Chrome only, since Firefox can't tell a locked screen from an idle one.
+
+```rust
+#[oxichrome::on(idle::on_state_changed)]
+async fn changed(state: State) {} // once per change
+```
+
+Firefox doesn't wake a sleeping background page for idle changes, and sends `idle` again each time the page restarts. oxichrome remembers the last state it sent (in `storage.session`, so it adds the `storage` permission when you listen to idle events) and sends each state once. When the background starts, it checks the state and sends a change it missed while asleep, so in Firefox a change can arrive late, and a short burst of activity while the page sleeps can be missed. Listening to `idle::on_state_changed` without `Idle` in `permissions` is a build error.
 
 `chrome.action` needs `action` in the manifest. oxichrome adds it when your extension has a `#[popup]` or an `#[on(action::on_clicked)]` handler. The click event doesn't fire while a popup is set.
 

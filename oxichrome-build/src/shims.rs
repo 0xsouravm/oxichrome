@@ -393,6 +393,33 @@ chrome.downloads.onErased.addListener((id) => {{
 }});
 "#
             ));
+        } else if event == "chrome.idle.onStateChanged" {
+            listeners.push_str(&format!(
+                r#"let idleLast = null;
+const idleKey = '__oxichrome_idle_last';
+
+function idleChanged(state) {{
+    const session = globalThis.chrome?.storage?.session;
+    const previous = session ? session.get(idleKey).then((saved) => saved[idleKey], () => idleLast) : Promise.resolve(idleLast);
+    previous.then((last) => {{
+        if (state === last) {{
+            return;
+        }}
+        idleLast = state;
+        const saved = session ? session.set({{ [idleKey]: state }}).catch(() => {{}}) : Promise.resolve();
+        saved.then(() => dispatch(() => [{handlers}].forEach((handler) => handler(state))));
+    }});
+}}
+
+{event}.addListener(idleChanged);
+
+globalThis.chrome?.storage?.session?.get([idleKey, '__oxichrome_idle_interval']).then((saved) => {{
+    if (saved[idleKey] !== undefined) {{
+        chrome.idle.queryState(saved.__oxichrome_idle_interval ?? 60).then(idleChanged, () => {{}});
+    }}
+}}, () => {{}});
+"#
+            ));
         } else if event == "chrome.cookies.onChanged" {
             listeners.push_str(&format!(
                 r#"{event}.addListener((info) => {{
@@ -991,6 +1018,16 @@ mod tests {
         assert!(js.contains("}, 200));"));
         assert!(js.contains("[__oxichrome_on_changed].forEach((handler) => handler(item))"));
         assert!(js.contains("typeof message.__oxichrome_download_save === 'object'"));
+    }
+
+    #[test]
+    fn idle_sends_each_state_once() {
+        let metadata = metadata_with_handlers(&[("changed", "idle", "on_state_changed")]);
+        let js = generate_background_js(&metadata, "test");
+        assert_eq!(js.matches("chrome.idle.onStateChanged.addListener").count(), 1);
+        assert!(js.contains("if (state === last) {"));
+        assert!(js.contains("session.set({ [idleKey]: state })"));
+        assert!(js.contains("chrome.idle.queryState(saved.__oxichrome_idle_interval ?? 60).then(idleChanged"));
     }
 
     #[test]
