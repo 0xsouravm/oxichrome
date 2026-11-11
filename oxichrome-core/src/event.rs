@@ -105,6 +105,10 @@ pub mod events {
     pub struct WindowsOnBoundsChanged;
     pub struct SidePanelOnOpened;
     pub struct SidePanelOnClosed;
+    pub struct OmniboxOnInputStarted;
+    pub struct OmniboxOnInputChanged;
+    pub struct OmniboxOnInputEntered;
+    pub struct OmniboxOnInputCancelled;
 }
 
 macro_rules! arity {
@@ -137,6 +141,10 @@ arity! {
     WindowsOnBoundsChanged = 1,
     SidePanelOnOpened = 1,
     SidePanelOnClosed = 1,
+    OmniboxOnInputStarted = 0,
+    OmniboxOnInputChanged = 1,
+    OmniboxOnInputEntered = 2,
+    OmniboxOnInputCancelled = 0,
 }
 
 impl EventArg<events::NotificationsOnClicked, 1> for String {}

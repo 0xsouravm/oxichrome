@@ -33,6 +33,8 @@ struct Manifest {
     side_panel: Option<ChromeSidePanel>,
     #[serde(skip_serializing_if = "Option::is_none")]
     sidebar_action: Option<SidebarAction>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    omnibox: Option<ManifestOmnibox>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     content_scripts: Vec<ContentScriptEntry>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -76,6 +78,11 @@ struct BackgroundConfig {
 #[derive(Serialize)]
 struct ContentSecurityPolicy {
     extension_pages: String,
+}
+
+#[derive(Serialize)]
+struct ManifestOmnibox {
+    keyword: String,
 }
 
 #[derive(Serialize)]
@@ -228,6 +235,9 @@ pub fn generate_manifest(metadata: &ExtensionMetadata, browser: Browser) -> anyh
             }),
             _ => None,
         },
+        omnibox: metadata.omnibox.as_ref().map(|omnibox| ManifestOmnibox {
+            keyword: omnibox.keyword.clone(),
+        }),
         content_scripts: metadata
             .content_scripts
             .iter()
@@ -397,6 +407,7 @@ mod tests {
             has_popup: true,
             has_options_page: true,
             side_panel: None,
+            omnibox: None,
             popup_styles: Vec::new(),
             options_styles: Vec::new(),
             content_scripts: vec![],
@@ -446,6 +457,7 @@ mod tests {
             has_popup: false,
             has_options_page: false,
             side_panel: None,
+            omnibox: None,
             popup_styles: Vec::new(),
             options_styles: Vec::new(),
             content_scripts: vec![ContentScript {
@@ -497,6 +509,7 @@ mod tests {
             has_popup: false,
             has_options_page: false,
             side_panel: None,
+            omnibox: None,
             popup_styles: Vec::new(),
             options_styles: Vec::new(),
             content_scripts: vec![ContentScript {
@@ -572,6 +585,7 @@ mod tests {
             has_popup: false,
             has_options_page: false,
             side_panel: None,
+            omnibox: None,
             popup_styles: Vec::new(),
             options_styles: Vec::new(),
             content_scripts: vec![],

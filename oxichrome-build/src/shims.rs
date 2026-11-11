@@ -202,6 +202,48 @@ chrome.commands.onCommand.addListener((name, tab) => {{
     )
 }
 
+fn generate_omnibox(metadata: &ExtensionMetadata) -> String {
+    let Some(omnibox) = &metadata.omnibox else {
+        return String::new();
+    };
+    let default = serde_json::to_string(&omnibox.default).unwrap_or_else(|_| "null".to_string());
+    format!(
+        r#"const omniboxFirefox = typeof globalThis.browser?.runtime?.getBrowserInfo === 'function';
+const omniboxDefault = {default};
+let omniboxTurn = 0;
+
+function omniboxEscape(text) {{
+    return text.replace(/[&<>"']/g, (c) => ({{ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&apos;' }})[c]);
+}}
+
+if (omniboxDefault !== null) {{
+    const description = omniboxFirefox
+        ? omniboxDefault.split('{{input}}').join('').replace(/\s+/g, ' ').trim()
+        : omniboxEscape(omniboxDefault).split('{{input}}').join('%s');
+    try {{
+        Promise.resolve(chrome.omnibox.setDefaultSuggestion({{ description }})).catch((error) => console.error('[oxichrome] Omnibox:', error));
+    }} catch (error) {{
+        console.error('[oxichrome] Omnibox:', error);
+    }}
+}}
+
+chrome.omnibox.onInputChanged.addListener((text, suggest) => {{
+    const turn = ++omniboxTurn;
+    dispatch(() => {{
+        Promise.resolve(__oxichrome_omnibox_suggest(text)).then((list) => {{
+            if (turn !== omniboxTurn || !Array.isArray(list)) {{
+                return;
+            }}
+            suggest(list.map((item) => ({{ content: item.content, description: omniboxFirefox ? item.plain : item.markup }})));
+        }}, (error) => console.error('[oxichrome] `{name}` failed:', error));
+    }});
+}});
+
+"#,
+        name = omnibox.fn_name
+    )
+}
+
 fn generate_side_panel(metadata: &ExtensionMetadata) -> String {
     let Some(panel) = &metadata.side_panel else {
         return String::new();
@@ -350,6 +392,9 @@ pub fn generate_background_js(metadata: &ExtensionMetadata, crate_name: &str) ->
     exports.extend(metadata.event_handlers.iter().map(|handler| handler.export.clone()));
     exports.extend(metadata.menus.iter().filter_map(|item| item.export.clone()));
     exports.extend(metadata.commands.iter().map(|command| command.export.clone()));
+    if metadata.omnibox.is_some() {
+        exports.push("__oxichrome_omnibox_suggest".to_string());
+    }
 
     let imports = if exports.is_empty() {
         String::new()
@@ -358,6 +403,7 @@ pub fn generate_background_js(metadata: &ExtensionMetadata, crate_name: &str) ->
     };
 
     let mut listeners = generate_side_panel(metadata);
+    listeners.push_str(&generate_omnibox(metadata));
     listeners.push_str(&generate_menus(metadata));
     listeners.push_str(&generate_commands(metadata));
     listeners.push_str(&generate_listeners(metadata));
@@ -572,6 +618,7 @@ mod tests {
             has_popup: false,
             has_options_page: false,
             side_panel: None,
+            omnibox: None,
             popup_styles: Vec::new(),
             options_styles: Vec::new(),
             content_scripts: vec![],
@@ -621,6 +668,7 @@ mod tests {
             has_popup: false,
             has_options_page: false,
             side_panel: None,
+            omnibox: None,
             popup_styles: Vec::new(),
             options_styles: Vec::new(),
             content_scripts: vec![],

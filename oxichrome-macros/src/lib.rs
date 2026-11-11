@@ -81,6 +81,19 @@ pub fn side_panel(attr: TokenStream, item: TokenStream) -> TokenStream {
 }
 
 /// ```ignore
+/// #[oxichrome::omnibox(keyword = "docs", default = "Search the docs for {input}")]
+/// async fn suggest(input: String) -> Vec<omnibox::Suggestion> {
+///     vec![omnibox::Suggestion::new("https://docs.rs", "Open docs.rs")]
+/// }
+/// ```
+#[proc_macro_attribute]
+pub fn omnibox(attr: TokenStream, item: TokenStream) -> TokenStream {
+    codegen::omnibox::expand(attr.into(), item.into())
+        .unwrap_or_else(|e| e.into_compile_error())
+        .into()
+}
+
+/// ```ignore
 /// #[oxichrome::content_script(matches = ["<all_urls>"])]
 /// async fn inject() {
 ///     // runs in web page context

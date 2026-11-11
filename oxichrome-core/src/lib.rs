@@ -9,6 +9,7 @@ pub mod i18n;
 pub mod js_bridge;
 mod json;
 pub mod notifications;
+pub mod omnibox;
 pub mod permissions;
 pub mod runtime;
 pub mod scripting;

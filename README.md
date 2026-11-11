@@ -275,6 +275,37 @@ async fn opened(panel: side_panel::Panel) {} // panel.window_id
 async fn closed(panel: side_panel::Panel) {}
 ```
 
+### `#[oxichrome::omnibox(...)]`
+
+Adds a keyword to the address bar. Typing the keyword and a space hands the rest of the line to your function, and the suggestions it returns show up as you type. No permission is needed.
+
+```rust
+use oxichrome::omnibox::{Description, Disposition, Suggestion};
+
+#[oxichrome::omnibox(keyword = "docs", default = "Search docs for {input}")]
+async fn suggest(input: String) -> Vec<Suggestion> {
+    vec![
+        Suggestion::new(
+            format!("https://docs.rs/{input}"),
+            Description::new().text("Open ").matched(&input).text(" on ").url("docs.rs"),
+        ),
+        Suggestion::new("https://crates.io", "Browse crates.io"),
+    ]
+}
+
+#[oxichrome::on(omnibox::on_input_entered)]
+async fn entered(text: String, disposition: Disposition) {
+    let url = if text.starts_with("https://") { text } else { format!("https://docs.rs/releases/search?query={text}") };
+    let _ = oxichrome::omnibox::open(&url, disposition).await;
+}
+```
+
+- `on_input_entered` gets the picked suggestion's `content`, or the typed text when the default row is picked. `Disposition` says whether to use the current tab, a new tab, or a background tab. `omnibox::open` follows it, and it refuses anything that isn't a full URL (including `javascript:`).
+- Plain strings work as descriptions. `Description` adds highlighting with `matched`, `url` and `dim`. Text is escaped for you, so `&` and `<` are safe. Firefox shows descriptions as plain text.
+- `default` is the first row. Chrome puts the typed text where `{input}` is. Firefox can't, so it shows the words around it ("Search docs for").
+- Each keystroke calls your function again. Answers that arrive after a newer keystroke are dropped, so a slow lookup never overwrites a fresh one. Suggestions with an empty `content` or description are left out with a console note.
+- `on_input_started` and `on_input_cancelled` take no arguments. Listening to `on_input_changed` is a build error, since your omnibox function already gets that text. One keyword per extension.
+
 ### `#[oxichrome::content_script(...)]`
 
 Rust that runs inside web pages. With `matches`, it starts by itself on every matching page. Without `matches`, it runs when you call it, and you can pass it a value and get one back.

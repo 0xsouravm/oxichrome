@@ -566,3 +566,38 @@ extern "C" {
     #[wasm_bindgen(js_name = on_side_panel_closed)]
     pub fn chrome_side_panel_on_closed_add_listener(callback: &Closure<dyn FnMut(JsValue)>);
 }
+
+#[wasm_bindgen(inline_js = r#"
+function api() {
+    return globalThis.chrome.omnibox;
+}
+
+export function on_omnibox_started(callback) {
+    api()?.onInputStarted.addListener(callback);
+}
+
+export function on_omnibox_changed(callback) {
+    api()?.onInputChanged.addListener(callback);
+}
+
+export function on_omnibox_entered(callback) {
+    api()?.onInputEntered.addListener(callback);
+}
+
+export function on_omnibox_cancelled(callback) {
+    api()?.onInputCancelled.addListener(callback);
+}
+"#)]
+extern "C" {
+    #[wasm_bindgen(js_name = on_omnibox_started)]
+    pub fn chrome_omnibox_on_input_started_add_listener(callback: &Closure<dyn FnMut(JsValue)>);
+
+    #[wasm_bindgen(js_name = on_omnibox_changed)]
+    pub fn chrome_omnibox_on_input_changed_add_listener(callback: &Closure<dyn FnMut(JsValue)>);
+
+    #[wasm_bindgen(js_name = on_omnibox_entered)]
+    pub fn chrome_omnibox_on_input_entered_add_listener(callback: &Closure<dyn FnMut(JsValue)>);
+
+    #[wasm_bindgen(js_name = on_omnibox_cancelled)]
+    pub fn chrome_omnibox_on_input_cancelled_add_listener(callback: &Closure<dyn FnMut(JsValue)>);
+}

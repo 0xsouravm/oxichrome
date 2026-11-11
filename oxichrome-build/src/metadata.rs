@@ -25,6 +25,7 @@ pub struct ExtensionMetadata {
     pub popup_styles: Vec<String>,
     pub options_styles: Vec<String>,
     pub side_panel: Option<SidePanel>,
+    pub omnibox: Option<Omnibox>,
     pub content_scripts: Vec<ContentScript>,
     pub gecko_id: Option<String>,
     pub icons: Vec<(u32, String)>,
@@ -34,6 +35,13 @@ pub struct ExtensionMetadata {
 }
 
 pub type Shortcut = BTreeMap<String, String>;
+
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+pub struct Omnibox {
+    pub fn_name: String,
+    pub keyword: String,
+    pub default: Option<String>,
+}
 
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]
 pub struct SidePanel {
@@ -196,6 +204,7 @@ enum Entry {
         #[serde(flatten)]
         panel: SidePanel,
     },
+    Omnibox(Omnibox),
     ContentScript {
         fn_name: String,
         export: String,
@@ -309,6 +318,7 @@ pub fn parse_entries(text: &str) -> anyhow::Result<ExtensionMetadata> {
     let mut popups = Vec::new();
     let mut options_pages = Vec::new();
     let mut side_panels: Vec<(String, SidePanel)> = Vec::new();
+    let mut omniboxes: Vec<Omnibox> = Vec::new();
     let mut menus = Vec::new();
     let mut commands = Vec::new();
     let mut backgrounds: Vec<(String, String)> = Vec::new();
@@ -378,6 +388,7 @@ pub fn parse_entries(text: &str) -> anyhow::Result<ExtensionMetadata> {
                 options_pages.push(fn_name)
             }
             Entry::SidePanel { fn_name, panel } => side_panels.push((fn_name, panel)),
+            Entry::Omnibox(omnibox) => omniboxes.push(omnibox),
             Entry::ContentScript {
                 fn_name,
                 export,
@@ -451,6 +462,15 @@ pub fn parse_entries(text: &str) -> anyhow::Result<ExtensionMetadata> {
         );
     }
     metadata.side_panel = side_panels.pop().map(|(_, panel)| panel);
+    omniboxes.sort_by(|a, b| a.fn_name.cmp(&b.fn_name));
+    if omniboxes.len() > 1 {
+        bail!(
+            "found {} `#[oxichrome::omnibox]` functions ({}); an extension has one address bar keyword",
+            omniboxes.len(),
+            omniboxes.iter().map(|omnibox| omnibox.fn_name.as_str()).collect::<Vec<_>>().join(", ")
+        );
+    }
+    metadata.omnibox = omniboxes.pop();
 
     backgrounds.sort();
     metadata.background_exports = backgrounds.into_iter().map(|(_, export)| export).collect();
@@ -461,7 +481,27 @@ pub fn parse_entries(text: &str) -> anyhow::Result<ExtensionMetadata> {
         .content_scripts
         .sort_by(|a, b| (&a.fn_name, &a.export).cmp(&(&b.fn_name, &b.export)));
     check_side_panel(&metadata)?;
+    check_omnibox(&metadata)?;
     Ok(metadata)
+}
+
+fn check_omnibox(metadata: &ExtensionMetadata) -> anyhow::Result<()> {
+    for handler in metadata.event_handlers.iter().filter(|handler| handler.namespace == "omnibox") {
+        if handler.event_name == "on_input_changed" {
+            bail!(
+                "`{}` listens to `omnibox::on_input_changed`; return suggestions from a `#[oxichrome::omnibox(keyword = \"...\")]` function instead, which gets the same text",
+                handler.fn_name
+            );
+        }
+        if metadata.omnibox.is_none() {
+            bail!(
+                "`{}` listens to `omnibox::{}`, but there's no keyword; add a `#[oxichrome::omnibox(keyword = \"...\")]` function",
+                handler.fn_name,
+                handler.event_name
+            );
+        }
+    }
+    Ok(())
 }
 
 fn check_side_panel(metadata: &ExtensionMetadata) -> anyhow::Result<()> {
