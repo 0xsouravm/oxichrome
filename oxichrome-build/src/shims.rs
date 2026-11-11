@@ -393,6 +393,16 @@ chrome.downloads.onErased.addListener((id) => {{
 }});
 "#
             ));
+        } else if event == "chrome.cookies.onChanged" {
+            listeners.push_str(&format!(
+                r#"{event}.addListener((info) => {{
+    if (info.removed && info.cause === 'overwrite') {{
+        return;
+    }}
+    dispatch(() => [{handlers}].forEach((handler) => handler(info)));
+}});
+"#
+            ));
         } else if event == "chrome.windows.onFocusChanged" {
             listeners.push_str(&format!(
                 r#"{event}.addListener((id) => {{
@@ -981,6 +991,15 @@ mod tests {
         assert!(js.contains("}, 200));"));
         assert!(js.contains("[__oxichrome_on_changed].forEach((handler) => handler(item))"));
         assert!(js.contains("typeof message.__oxichrome_download_save === 'object'"));
+    }
+
+    #[test]
+    fn cookie_overwrites_send_only_the_new_cookie() {
+        let metadata = metadata_with_handlers(&[("changed", "cookies", "on_changed")]);
+        let js = generate_background_js(&metadata, "test");
+        assert_eq!(js.matches("chrome.cookies.onChanged.addListener").count(), 1);
+        assert!(js.contains("if (info.removed && info.cause === 'overwrite') {"));
+        assert!(js.contains("[__oxichrome_on_changed].forEach((handler) => handler(info))"));
     }
 
     #[test]

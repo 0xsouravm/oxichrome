@@ -603,6 +603,39 @@ extern "C" {
 }
 
 #[wasm_bindgen(inline_js = r#"
+export function cookies_call(method, arg) {
+    const cookies = globalThis.chrome?.cookies;
+    if (!cookies) {
+        throw new Error('oxichrome:no-permission');
+    }
+    return Promise.resolve(arg === undefined ? cookies[method]() : cookies[method](arg));
+}
+
+export function cookies_reachable(url) {
+    const parsed = new URL(url);
+    const contains = globalThis.chrome?.permissions?.contains;
+    if (typeof contains !== 'function') {
+        return Promise.resolve(true);
+    }
+    return Promise.resolve(chrome.permissions.contains({ origins: [`${parsed.protocol}//${parsed.hostname}/*`] }));
+}
+
+export function on_cookies_changed(callback) {
+    globalThis.chrome?.cookies?.onChanged.addListener(callback);
+}
+"#)]
+extern "C" {
+    #[wasm_bindgen(catch)]
+    pub fn cookies_call(method: &str, arg: &JsValue) -> Result<js_sys::Promise, JsValue>;
+
+    #[wasm_bindgen(catch)]
+    pub fn cookies_reachable(url: &str) -> Result<js_sys::Promise, JsValue>;
+
+    #[wasm_bindgen(js_name = on_cookies_changed)]
+    pub fn chrome_cookies_on_changed_add_listener(callback: &Closure<dyn FnMut(JsValue)>);
+}
+
+#[wasm_bindgen(inline_js = r#"
 function api() {
     const downloads = globalThis.chrome?.downloads;
     if (!downloads) {

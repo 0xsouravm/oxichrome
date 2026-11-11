@@ -622,6 +622,15 @@ downloads::save(Save::bytes("photo.png", png_bytes)).await?;                    
 let d = downloads::get(id).await?;                                                    // d.state, d.bytes_received, d.filename, ...
 let paused = downloads::search(Query::new().text("report").state(State::Paused).limit(10)).await?;
 downloads::pause(id).await?;   // also resume, cancel, erase, erase_matching, remove_file, file_icon
+
+// Cookies (requires the "cookies" permission and host permissions for the sites)
+use oxichrome::cookies::{self, Query, SameSite, Set};
+cookies::set(Set::new("https://example.com/", "theme", "dark").expires_in(Duration::from_secs(86_400))).await?;
+cookies::set(Set::new("https://app.example.com/", "sid", token).domain("example.com").secure().http_only().same_site(SameSite::Lax)).await?;
+let c = cookies::get("https://example.com/", "theme").await?;                       // Option<Cookie>
+let all = cookies::all(Query::new().domain("example.com")).await?;                   // also url, name, path, secure, session, store
+let gone = cookies::remove("https://example.com/", "theme").await?;                   // Some(cookie) if one was removed
+cookies::remove_all(Query::new().domain("example.com")).await?;                       // also remove_cookie(&cookie), stores()
 // Runtime
 let url = oxichrome::runtime::get_url("icon.png");
 oxichrome::runtime::send_message(&msg).await?;
@@ -705,6 +714,24 @@ view! { <button on:click=downloads::open_on_click(id, |result| async move { /* E
 ```
 
 Browsers send `on_changed` as a list of fields that changed, in different shapes, and Firefox cancels by passing through a state that looks paused. oxichrome waits for a change to settle (200 ms) and sends the whole `Download`, so each handler sees the state it ended in. Listening to a downloads event without `Downloads` in `permissions` is a build error.
+
+A `Cookie` reads the same in both browsers: `domain` without the leading dot (`host_only` says whether subdomains get it), `path`, `secure`, `http_only`, `same_site`, `expires` in seconds since the epoch (`None` for a session cookie), `store` and `partition`. `cookie.url()` gives a URL it applies to.
+
+Each browser refuses different cookies, and Chrome only says "Failed to parse or set cookie", so oxichrome refuses the union before anything is sent, with a reason. The URL must be `http` or `https`. Names can't be empty, have spaces at the ends, non-ASCII letters (Chrome and Firefox send them differently), `;`, `=` or `,`. Values can't have spaces at the ends, `;` or control characters, and name plus value can be at most 4096 bytes. A `domain` must be the URL's host or a parent of it. `secure()` needs an `https://` URL, because Firefox refuses secure cookies on `http://` even on localhost. `SameSite::None`, `__Secure-` names and partitioned cookies need `secure()`, and a `__Host-` cookie also needs the path `/` and no domain. An expiry in the past is refused: use `remove`. Without a `path`, oxichrome uses the standard default (`/a/b` for `/a/b/c.html`), which Firefox would otherwise give a trailing slash. Both browsers cap expiry at 400 days.
+
+`remove` deletes exactly the cookie `get` would return, and `remove_cookie` exactly the one you pass. Chrome's own remove also deletes same-named cookies on parent paths. Reading or setting a cookie for a site without host permission returns `InvalidArgument` in both browsers, where Firefox would return nothing. Partitioned cookies (`.partitioned("https://top.org")`) are left out of `get` and `all` unless the query asks with `partitioned(site)` or `any_partition()`.
+
+```rust
+#[oxichrome::on(cookies::on_changed)]
+async fn changed(change: Change) {
+    match change {
+        Change::Set(cookie) => {}
+        Change::Removed { cookie, cause } => {} // Explicit, Expired or Evicted
+    }
+}
+```
+
+Overwriting a cookie sends one `Set`, not a removal and then a set (Firefox's removal even carries the new value). A cookie that runs out sends `Removed` with `Expired` in Chrome; Firefox sends nothing. Listening to `cookies::on_changed` without `Cookies` in `permissions`, or having `Cookies` without any host permissions, is a build error.
 
 `chrome.action` needs `action` in the manifest. oxichrome adds it when your extension has a `#[popup]` or an `#[on(action::on_clicked)]` handler. The click event doesn't fire while a popup is set.
 

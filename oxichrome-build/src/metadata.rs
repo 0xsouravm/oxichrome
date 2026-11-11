@@ -483,6 +483,7 @@ pub fn parse_entries(text: &str) -> anyhow::Result<ExtensionMetadata> {
     check_side_panel(&metadata)?;
     check_omnibox(&metadata)?;
     check_downloads(&metadata)?;
+    check_cookies(&metadata)?;
     Ok(metadata)
 }
 
@@ -496,6 +497,23 @@ fn check_downloads(metadata: &ExtensionMetadata) -> anyhow::Result<()> {
                 handler.event_name
             );
         }
+    }
+    Ok(())
+}
+
+fn check_cookies(metadata: &ExtensionMetadata) -> anyhow::Result<()> {
+    let listed = metadata.permissions.iter().chain(&metadata.optional_permissions).any(|permission| permission == "cookies");
+    if let Some(handler) = metadata.event_handlers.iter().find(|handler| handler.namespace == "cookies") {
+        if !listed {
+            bail!(
+                "`{}` listens to `cookies::{}`; add `Cookies` to `permissions` in #[oxichrome::extension]",
+                handler.fn_name,
+                handler.event_name
+            );
+        }
+    }
+    if listed && metadata.host_permissions.is_empty() && metadata.optional_host_permissions.is_empty() {
+        bail!("`Cookies` only reaches sites the extension has host permission for; add them to `host_permissions` in #[oxichrome::extension], like `\"https://example.com/*\"`");
     }
     Ok(())
 }
