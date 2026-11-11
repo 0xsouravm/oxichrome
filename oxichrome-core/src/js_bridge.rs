@@ -503,3 +503,66 @@ extern "C" {
     #[wasm_bindgen(js_name = on_windows_bounds_changed)]
     pub fn chrome_windows_on_bounds_changed_add_listener(callback: &Closure<dyn FnMut(JsValue)>);
 }
+
+#[wasm_bindgen(inline_js = r#"
+function chromePanel() {
+    return globalThis.chrome?.sidePanel;
+}
+
+function firefoxSidebar() {
+    return chromePanel() ? undefined : globalThis.browser?.sidebarAction;
+}
+
+export function side_panel_ready() {
+    const manifest = globalThis.chrome?.runtime?.getManifest?.();
+    if (!manifest) {
+        return 'context';
+    }
+    if (!manifest.side_panel && !manifest.sidebar_action) {
+        return 'missing';
+    }
+    if (!chromePanel() && !firefoxSidebar()) {
+        return 'context';
+    }
+    return '';
+}
+
+export function side_panel_open() {
+    const sidebar = firefoxSidebar();
+    if (sidebar) {
+        return sidebar.open();
+    }
+    return chromePanel().open({ windowId: chrome.windows.WINDOW_ID_CURRENT });
+}
+
+export function side_panel_close() {
+    const sidebar = firefoxSidebar();
+    if (sidebar) {
+        return sidebar.close();
+    }
+    return chrome.windows.getCurrent().then((window) => chromePanel().close({ windowId: window.id }));
+}
+
+export function on_side_panel_opened(callback) {
+    chromePanel()?.onOpened?.addListener(callback);
+}
+
+export function on_side_panel_closed(callback) {
+    chromePanel()?.onClosed?.addListener(callback);
+}
+"#)]
+extern "C" {
+    pub fn side_panel_ready() -> String;
+
+    #[wasm_bindgen(catch)]
+    pub fn side_panel_open() -> Result<js_sys::Promise, JsValue>;
+
+    #[wasm_bindgen(catch)]
+    pub fn side_panel_close() -> Result<js_sys::Promise, JsValue>;
+
+    #[wasm_bindgen(js_name = on_side_panel_opened)]
+    pub fn chrome_side_panel_on_opened_add_listener(callback: &Closure<dyn FnMut(JsValue)>);
+
+    #[wasm_bindgen(js_name = on_side_panel_closed)]
+    pub fn chrome_side_panel_on_closed_add_listener(callback: &Closure<dyn FnMut(JsValue)>);
+}

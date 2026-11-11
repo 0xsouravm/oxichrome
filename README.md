@@ -42,9 +42,9 @@ cargo oxichrome build --target firefox # Firefox
 
 ## What it does
 
-- Proc macros (`#[extension]`, `#[background]`, `#[on]`, `#[popup]`, `#[options_page]`, `#[content_script]`, `#[menu]`, `#[submenu]`, `#[command]`) transform your Rust into wasm-bindgen exports
+- Proc macros (`#[extension]`, `#[background]`, `#[on]`, `#[popup]`, `#[options_page]`, `#[side_panel]`, `#[content_script]`, `#[menu]`, `#[submenu]`, `#[command]`) transform your Rust into wasm-bindgen exports
 - Typed bindings to `chrome.storage`, `chrome.tabs`, `chrome.runtime`
-- Leptos for reactive popup and options page UI
+- Leptos for reactive popup, options page and side panel UI
 - `cargo oxichrome build` handles everything: compilation, wasm-bindgen, manifest generation, JS/HTML shim generation, static asset copying, optional wasm-opt
 - **`--target firefox`** generates a Firefox-compatible Manifest V3 extension
 - Separate `dist/chromium/` and `dist/firefox/` output directories
@@ -211,6 +211,51 @@ Marks a Leptos component as the options page UI.
 fn Options() -> impl IntoView {
     view! { <h1>"Settings"</h1> }
 }
+```
+
+### `#[oxichrome::side_panel(...)]`
+
+Marks a Leptos component as the side panel: Chrome's side panel and Firefox's sidebar, from the same code.
+
+```rust
+use oxichrome::side_panel;
+
+#[oxichrome::side_panel(title = "Notes")]
+fn Notes() -> impl IntoView {
+    view! {
+        <h1>"Notes"</h1>
+        <button on:click=side_panel::close_on_click(|_closed| async {})>"Close"</button>
+    }
+}
+```
+
+Both options are optional. `title` is what Firefox shows above the sidebar and in its sidebar menu, and it takes `t!(key)` too. Chrome always shows the extension's name. `#[oxichrome::side_panel(open_on_action_click)]` makes the toolbar button open and close the panel. Because a toolbar click can only do one thing, it can't be combined with a `#[popup]` or an `#[on(action::on_clicked)]` handler, and the build tells you if it is.
+
+Firefox would open a sidebar by itself when the extension is installed. Chrome never does, so oxichrome turns that off and both browsers wait for the user.
+
+Browsers only open the panel during a click or key press, and Firefox only while that event is being handled: one `.await` later it refuses. So, like `permissions::request_on_click`, `side_panel::open_on_click` and `close_on_click` give you the event handler itself. Use them in the popup, the options page, the panel or a tab showing an extension page, and they pass you `Ok(())` or the reason it didn't work. Opening an open panel or closing a closed one is `Ok`.
+
+```rust
+#[oxichrome::popup]
+fn Popup() -> impl IntoView {
+    view! {
+        <button on:click=side_panel::open_on_click(|opened| async move {
+            if let Err(err) = opened {
+                oxichrome::log!("{err}");
+            }
+        })>"Open notes"</button>
+    }
+}
+```
+
+In Chrome you can also listen for the panel opening and closing. Firefox doesn't report either, and the Firefox build says so:
+
+```rust
+#[oxichrome::on(side_panel::on_opened)]
+async fn opened(panel: side_panel::Panel) {} // panel.window_id
+
+#[oxichrome::on(side_panel::on_closed)]
+async fn closed(panel: side_panel::Panel) {}
 ```
 
 ### `#[oxichrome::content_script(...)]`
@@ -606,6 +651,7 @@ dist/
 │   ├── background.js
 │   ├── popup.html / popup.js
 │   ├── options.html / options.js
+│   ├── sidepanel.html / sidepanel.js
 │   └── wasm/
 │       ├── crate_name.js
 │       └── crate_name_bg.wasm

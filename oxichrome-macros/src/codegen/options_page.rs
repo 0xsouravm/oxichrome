@@ -27,8 +27,8 @@ pub fn expand(item: TokenStream) -> Result<TokenStream, syn::Error> {
         #vis fn #fn_name() #ret #fn_body
 
         #[doc(hidden)]
-        #[oxichrome::__private::wasm_bindgen::prelude::wasm_bindgen]
-        pub fn __oxichrome_mount_options() {
+        #[oxichrome::__private::wasm_bindgen::prelude::wasm_bindgen(js_name = __oxichrome_mount_options)]
+        pub fn __oxichrome_only_one_options_page_per_extension() {
             let handle = ::leptos::mount::mount_to_body(#fn_name);
             std::mem::forget(handle);
         }

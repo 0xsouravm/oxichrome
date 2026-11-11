@@ -103,6 +103,8 @@ pub mod events {
     pub struct WindowsOnRemoved;
     pub struct WindowsOnFocusChanged;
     pub struct WindowsOnBoundsChanged;
+    pub struct SidePanelOnOpened;
+    pub struct SidePanelOnClosed;
 }
 
 macro_rules! arity {
@@ -133,6 +135,8 @@ arity! {
     WindowsOnRemoved = 1,
     WindowsOnFocusChanged = 1,
     WindowsOnBoundsChanged = 1,
+    SidePanelOnOpened = 1,
+    SidePanelOnClosed = 1,
 }
 
 impl EventArg<events::NotificationsOnClicked, 1> for String {}

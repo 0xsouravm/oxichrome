@@ -22,6 +22,7 @@ pub struct ExtensionMetadata {
     pub event_handlers: Vec<EventHandler>,
     pub has_popup: bool,
     pub has_options_page: bool,
+    pub side_panel: Option<SidePanel>,
     pub content_scripts: Vec<ContentScript>,
     pub gecko_id: Option<String>,
     pub icons: Vec<(u32, String)>,
@@ -31,6 +32,13 @@ pub struct ExtensionMetadata {
 }
 
 pub type Shortcut = BTreeMap<String, String>;
+
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+pub struct SidePanel {
+    pub title: Option<String>,
+    #[serde(default)]
+    pub open_on_action_click: bool,
+}
 
 #[derive(Debug, Clone, Deserialize, PartialEq)]
 pub struct UsedMessage {
@@ -175,6 +183,11 @@ enum Entry {
     OptionsPage {
         fn_name: String,
     },
+    SidePanel {
+        fn_name: String,
+        #[serde(flatten)]
+        panel: SidePanel,
+    },
     ContentScript {
         fn_name: String,
         export: String,
@@ -287,6 +300,7 @@ pub fn parse_entries(text: &str) -> anyhow::Result<ExtensionMetadata> {
     let mut extensions = Vec::new();
     let mut popups = Vec::new();
     let mut options_pages = Vec::new();
+    let mut side_panels: Vec<(String, SidePanel)> = Vec::new();
     let mut menus = Vec::new();
     let mut commands = Vec::new();
     let mut backgrounds: Vec<(String, String)> = Vec::new();
@@ -349,6 +363,7 @@ pub fn parse_entries(text: &str) -> anyhow::Result<ExtensionMetadata> {
             }),
             Entry::Popup { fn_name } => popups.push(fn_name),
             Entry::OptionsPage { fn_name } => options_pages.push(fn_name),
+            Entry::SidePanel { fn_name, panel } => side_panels.push((fn_name, panel)),
             Entry::ContentScript {
                 fn_name,
                 export,
@@ -413,6 +428,15 @@ pub fn parse_entries(text: &str) -> anyhow::Result<ExtensionMetadata> {
     metadata.commands = resolve_commands(commands, action_shortcut.as_ref())?;
     metadata.has_popup = !popups.is_empty();
     metadata.has_options_page = !options_pages.is_empty();
+    side_panels.sort_by(|a, b| a.0.cmp(&b.0));
+    if side_panels.len() > 1 {
+        bail!(
+            "found {} `#[oxichrome::side_panel]` components ({}); an extension can have only one side panel",
+            side_panels.len(),
+            side_panels.iter().map(|(name, _)| name.as_str()).collect::<Vec<_>>().join(", ")
+        );
+    }
+    metadata.side_panel = side_panels.pop().map(|(_, panel)| panel);
 
     backgrounds.sort();
     metadata.background_exports = backgrounds.into_iter().map(|(_, export)| export).collect();
@@ -422,7 +446,45 @@ pub fn parse_entries(text: &str) -> anyhow::Result<ExtensionMetadata> {
     metadata
         .content_scripts
         .sort_by(|a, b| (&a.fn_name, &a.export).cmp(&(&b.fn_name, &b.export)));
+    check_side_panel(&metadata)?;
     Ok(metadata)
+}
+
+fn check_side_panel(metadata: &ExtensionMetadata) -> anyhow::Result<()> {
+    let panel_events: Vec<&EventHandler> = metadata
+        .event_handlers
+        .iter()
+        .filter(|handler| handler.namespace == "side_panel")
+        .collect();
+    let Some(panel) = &metadata.side_panel else {
+        if let Some(handler) = panel_events.first() {
+            bail!(
+                "`{}` listens to `side_panel::{}`, but there's no side panel; add a `#[oxichrome::side_panel]` component",
+                handler.fn_name,
+                handler.event_name
+            );
+        }
+        return Ok(());
+    };
+    if !panel.open_on_action_click {
+        return Ok(());
+    }
+    if metadata.has_popup {
+        bail!(
+            "the side panel has `open_on_action_click`, but there's also a `#[oxichrome::popup]`; a toolbar click opens one or the other, so remove one of them (a button in the popup can open the panel with `side_panel::open_on_click`)"
+        );
+    }
+    if let Some(handler) = metadata
+        .event_handlers
+        .iter()
+        .find(|handler| handler.namespace == "action" && handler.event_name == "on_clicked")
+    {
+        bail!(
+            "the side panel has `open_on_action_click`, so `{}` (`action::on_clicked`) would never run in Chrome; remove one of them",
+            handler.fn_name
+        );
+    }
+    Ok(())
 }
 
 pub fn check_messages(metadata: &ExtensionMetadata, default_keys: Option<&[String]>) -> anyhow::Result<()> {
@@ -771,6 +833,25 @@ mod tests {
         );
         let err = parse_entries(&options).unwrap_err().to_string();
         assert!(err.contains("only one options page"), "{err}");
+    }
+
+    #[test]
+    fn side_panel_checks() {
+        let panel = |flag: bool| format!("{{\"kind\":\"side_panel\",\"fn_name\":\"Panel\",\"title\":null,\"open_on_action_click\":{flag}}}");
+        let event = |namespace: &str, event: &str| format!("{{\"kind\":\"event\",\"fn_name\":\"f\",\"export\":\"e\",\"namespace\":\"{namespace}\",\"event_name\":\"{event}\"}}");
+        let parse = |lines: &[String]| parse_entries(&format!("{EXTENSION}\n{}", lines.join("\n")));
+        let ok = parse(&[panel(true)]).unwrap();
+        assert_eq!(ok.side_panel, Some(SidePanel { title: None, open_on_action_click: true }));
+        let err = parse(&[panel(false), panel(false).replace("Panel", "Other")]).unwrap_err().to_string();
+        assert!(err.contains("only one side panel") && err.contains("Other, Panel"), "{err}");
+        let err = parse(&[panel(true), "{\"kind\":\"popup\",\"fn_name\":\"Pop\"}".to_string()]).unwrap_err().to_string();
+        assert!(err.contains("#[oxichrome::popup]"), "{err}");
+        let err = parse(&[panel(true), event("action", "on_clicked")]).unwrap_err().to_string();
+        assert!(err.contains("would never run in Chrome"), "{err}");
+        assert!(parse(&[panel(false), event("action", "on_clicked"), "{\"kind\":\"popup\",\"fn_name\":\"Pop\"}".to_string()]).is_ok());
+        let err = parse(&[event("side_panel", "on_opened")]).unwrap_err().to_string();
+        assert!(err.contains("there's no side panel"), "{err}");
+        assert!(parse(&[panel(false), event("side_panel", "on_closed")]).is_ok());
     }
 
     #[test]

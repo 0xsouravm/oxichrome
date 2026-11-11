@@ -118,7 +118,10 @@ pub fn run(release: bool, browser: Browser) -> Result<()> {
         println!(
             "[oxichrome] Note: Firefox doesn't have {}, so {} never {} there",
             if left_out_events.len() == 1 { "that event" } else { "those events" },
-            left_out_events.join(", "),
+            match left_out_events.split_last() {
+                Some((last, rest)) if !rest.is_empty() => format!("{} and {last}", rest.join(", ")),
+                _ => left_out_events.join(""),
+            },
             if left_out_events.len() == 1 { "runs" } else { "run" }
         );
     }
@@ -134,6 +137,14 @@ pub fn run(release: bool, browser: Browser) -> Result<()> {
         let popup_js = shims::generate_popup_js(&crate_name);
         fs::write(dist_dir.join("popup.js"), &popup_js).context("failed to write popup.js")?;
         println!("[oxichrome] Generated popup.html + popup.js");
+    }
+
+    if metadata.side_panel.is_some() {
+        fs::write(dist_dir.join("sidepanel.html"), shims::generate_side_panel_html())
+            .context("failed to write sidepanel.html")?;
+        fs::write(dist_dir.join("sidepanel.js"), shims::generate_side_panel_js(&crate_name))
+            .context("failed to write sidepanel.js")?;
+        println!("[oxichrome] Generated sidepanel.html + sidepanel.js");
     }
 
     if metadata.has_options_page {

@@ -68,6 +68,19 @@ pub fn options_page(_attr: TokenStream, item: TokenStream) -> TokenStream {
 }
 
 /// ```ignore
+/// #[oxichrome::side_panel(title = "Notes", open_on_action_click)]
+/// fn Panel() -> impl IntoView {
+///     view! { <h1>"Notes"</h1> }
+/// }
+/// ```
+#[proc_macro_attribute]
+pub fn side_panel(attr: TokenStream, item: TokenStream) -> TokenStream {
+    codegen::side_panel::expand(attr.into(), item.into(), order())
+        .unwrap_or_else(|e| e.into_compile_error())
+        .into()
+}
+
+/// ```ignore
 /// #[oxichrome::content_script(matches = ["<all_urls>"])]
 /// async fn inject() {
 ///     // runs in web page context

@@ -12,6 +12,7 @@ pub mod notifications;
 pub mod permissions;
 pub mod runtime;
 pub mod scripting;
+pub mod side_panel;
 pub mod storage;
 pub mod tabs;
 pub mod windows;

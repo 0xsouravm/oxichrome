@@ -29,6 +29,10 @@ struct Manifest {
     content_security_policy: ContentSecurityPolicy,
     #[serde(skip_serializing_if = "Option::is_none")]
     options_ui: Option<OptionsUi>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    side_panel: Option<ChromeSidePanel>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    sidebar_action: Option<SidebarAction>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     content_scripts: Vec<ContentScriptEntry>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -72,6 +76,19 @@ struct BackgroundConfig {
 #[derive(Serialize)]
 struct ContentSecurityPolicy {
     extension_pages: String,
+}
+
+#[derive(Serialize)]
+struct ChromeSidePanel {
+    default_path: String,
+}
+
+#[derive(Serialize)]
+struct SidebarAction {
+    default_panel: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    default_title: Option<String>,
+    open_at_install: bool,
 }
 
 #[derive(Serialize)]
@@ -149,6 +166,9 @@ pub fn generate_manifest(metadata: &ExtensionMetadata, browser: Browser) -> anyh
             if !metadata.menus.is_empty() && !permissions.iter().any(|p| p == "contextMenus") {
                 permissions.push("contextMenus".to_string());
             }
+            if metadata.side_panel.is_some() && browser == Browser::Chromium && !permissions.iter().any(|p| p == "sidePanel") {
+                permissions.push("sidePanel".to_string());
+            }
             permissions
         },
         optional_permissions: for_browser(&metadata.optional_permissions, metadata, browser),
@@ -157,6 +177,7 @@ pub fn generate_manifest(metadata: &ExtensionMetadata, browser: Browser) -> anyh
         icons: metadata.icons.iter().cloned().collect(),
         action: if metadata.has_popup
             || metadata.action.is_some()
+            || metadata.side_panel.as_ref().is_some_and(|panel| panel.open_on_action_click)
             || metadata
                 .event_handlers
                 .iter()
@@ -192,6 +213,20 @@ pub fn generate_manifest(metadata: &ExtensionMetadata, browser: Browser) -> anyh
             })
         } else {
             None
+        },
+        side_panel: match (&metadata.side_panel, browser) {
+            (Some(_), Browser::Chromium) => Some(ChromeSidePanel {
+                default_path: "sidepanel.html".to_string(),
+            }),
+            _ => None,
+        },
+        sidebar_action: match (&metadata.side_panel, browser) {
+            (Some(panel), Browser::Firefox) => Some(SidebarAction {
+                default_panel: "sidepanel.html".to_string(),
+                default_title: panel.title.clone(),
+                open_at_install: false,
+            }),
+            _ => None,
         },
         content_scripts: metadata
             .content_scripts
@@ -302,6 +337,29 @@ mod tests {
     }
 
     #[test]
+    fn side_panel_keys_match_each_browser() {
+        let source = r#"{"kind":"extension","name":"P","version":"1.0.0","description":null,"gecko_id":null,"permissions":["storage"],"host_permissions":[],"icons":[],"action":null}
+{"kind":"side_panel","fn_name":"Panel","title":"Notes","open_on_action_click":false}"#;
+        let metadata = crate::metadata::parse_entries(source).unwrap();
+        let chrome: serde_json::Value = serde_json::from_str(&generate_manifest(&metadata, Browser::Chromium).unwrap()).unwrap();
+        assert_eq!(chrome["side_panel"], serde_json::json!({"default_path": "sidepanel.html"}));
+        assert_eq!(chrome["permissions"], serde_json::json!(["storage", "sidePanel"]));
+        assert!(chrome.get("sidebar_action").is_none() && chrome.get("action").is_none());
+        let firefox: serde_json::Value = serde_json::from_str(&generate_manifest(&metadata, Browser::Firefox).unwrap()).unwrap();
+        assert_eq!(firefox["sidebar_action"], serde_json::json!({"default_panel": "sidepanel.html", "default_title": "Notes", "open_at_install": false}));
+        assert_eq!(firefox["permissions"], serde_json::json!(["storage"]));
+        assert!(firefox.get("side_panel").is_none() && firefox.get("action").is_none());
+
+        let source = source.replace("\"title\":\"Notes\",\"open_on_action_click\":false", "\"title\":null,\"open_on_action_click\":true").replace("[\"storage\"]", "[\"storage\",\"sidePanel\"]");
+        let metadata = crate::metadata::parse_entries(&source).unwrap();
+        let chrome: serde_json::Value = serde_json::from_str(&generate_manifest(&metadata, Browser::Chromium).unwrap()).unwrap();
+        assert_eq!(chrome["permissions"], serde_json::json!(["storage", "sidePanel"]));
+        assert!(chrome.get("action").is_some());
+        let firefox: serde_json::Value = serde_json::from_str(&generate_manifest(&metadata, Browser::Firefox).unwrap()).unwrap();
+        assert!(firefox.get("action").is_some() && firefox["sidebar_action"].get("default_title").is_none());
+    }
+
+    #[test]
     fn test_action_args_alone_create_the_action() {
         let source = r#"{"kind":"extension","name":"A","version":"1.0.0","description":null,"gecko_id":null,"permissions":[],"host_permissions":[],"icons":[],"action":{"default_title":null,"default_icon":"a.png"}}"#;
         let metadata = crate::metadata::parse_entries(source).unwrap();
@@ -338,6 +396,7 @@ mod tests {
             event_handlers: vec![],
             has_popup: true,
             has_options_page: true,
+            side_panel: None,
             content_scripts: vec![],
             gecko_id: None,
             display_name: None,
@@ -384,6 +443,7 @@ mod tests {
             event_handlers: vec![],
             has_popup: false,
             has_options_page: false,
+            side_panel: None,
             content_scripts: vec![ContentScript {
                 fn_name: "inject".to_string(),
                 export: "__oxichrome_cs_inject".to_string(),
@@ -432,6 +492,7 @@ mod tests {
             event_handlers: vec![],
             has_popup: false,
             has_options_page: false,
+            side_panel: None,
             content_scripts: vec![ContentScript {
                 fn_name: "inject".to_string(),
                 export: "__oxichrome_cs_inject".to_string(),
@@ -504,6 +565,7 @@ mod tests {
             event_handlers: vec![],
             has_popup: false,
             has_options_page: false,
+            side_panel: None,
             content_scripts: vec![],
         };
         let json = generate_manifest(&metadata, Browser::Chromium).unwrap();
