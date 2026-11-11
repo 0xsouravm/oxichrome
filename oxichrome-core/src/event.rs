@@ -5,7 +5,7 @@ use crate::error::{OxichromeError, Result};
 #[diagnostic::on_unimplemented(
     message = "`{Self}` can't be an event handler argument",
     label = "unsupported argument type",
-    note = "use `JsValue`, `String`, `bool`, `u32`, an `Option` of those, or a type oxichrome provides for this event such as `alarms::Alarm`, `context_menus::Click` or `commands::Press`"
+    note = "use `JsValue`, `String`, `bool`, `u32`, `i32`, an `Option` of those, or a type oxichrome provides for this event such as `alarms::Alarm`, `tabs::Tab` or `windows::Window`"
 )]
 pub trait FromEventArg: Sized {
     fn from_event_arg(value: JsValue) -> Result<Self>;
@@ -43,6 +43,17 @@ impl FromEventArg for u32 {
                 "expected a whole number from 0 to {}, got {value:?}",
                 u32::MAX
             ))),
+        }
+    }
+}
+
+impl FromEventArg for i32 {
+    fn from_event_arg(value: JsValue) -> Result<Self> {
+        match value.as_f64() {
+            Some(number) if number.fract() == 0.0 && (i32::MIN as f64..=i32::MAX as f64).contains(&number) => {
+                Ok(number as i32)
+            }
+            _ => Err(OxichromeError::UnexpectedValue(format!("expected a whole number, got {value:?}"))),
         }
     }
 }
@@ -88,6 +99,10 @@ pub mod events {
     pub struct CommandsOnCommand;
     pub struct PermissionsOnAdded;
     pub struct PermissionsOnRemoved;
+    pub struct WindowsOnCreated;
+    pub struct WindowsOnRemoved;
+    pub struct WindowsOnFocusChanged;
+    pub struct WindowsOnBoundsChanged;
 }
 
 macro_rules! arity {
@@ -114,6 +129,10 @@ arity! {
     CommandsOnCommand = 2,
     PermissionsOnAdded = 1,
     PermissionsOnRemoved = 1,
+    WindowsOnCreated = 1,
+    WindowsOnRemoved = 1,
+    WindowsOnFocusChanged = 1,
+    WindowsOnBoundsChanged = 1,
 }
 
 impl EventArg<events::NotificationsOnClicked, 1> for String {}

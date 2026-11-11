@@ -409,3 +409,97 @@ extern "C" {
     #[wasm_bindgen(catch)]
     pub fn i18n_detect_language(text: &str) -> Result<js_sys::Promise, JsValue>;
 }
+
+#[wasm_bindgen(inline_js = r#"
+function api() {
+    return globalThis.browser?.windows ?? globalThis.chrome.windows;
+}
+
+function isFirefox() {
+    return typeof globalThis.browser?.runtime?.getBrowserInfo === 'function';
+}
+
+export function windows_get(id, populate) {
+    return api().get(id, { populate });
+}
+
+export function windows_current(populate) {
+    return api().getCurrent({ populate });
+}
+
+export function windows_last_focused(populate) {
+    return api().getLastFocused({ populate });
+}
+
+export function windows_all(populate) {
+    return api().getAll({ populate });
+}
+
+export function windows_create(data) {
+    if (!isFirefox()) {
+        delete data.titlePreface;
+    }
+    return api().create(data).then((window) => window ?? null);
+}
+
+export function windows_update(id, info) {
+    if (!isFirefox()) {
+        delete info.titlePreface;
+    }
+    return api().update(id, info);
+}
+
+export function windows_remove(id) {
+    return api().remove(id);
+}
+
+export function on_windows_created(callback) {
+    api().onCreated.addListener(callback);
+}
+
+export function on_windows_removed(callback) {
+    api().onRemoved.addListener(callback);
+}
+
+export function on_windows_focus_changed(callback) {
+    api().onFocusChanged.addListener((id) => callback(id === -1 ? null : id));
+}
+
+export function on_windows_bounds_changed(callback) {
+    api().onBoundsChanged?.addListener(callback);
+}
+"#)]
+extern "C" {
+    #[wasm_bindgen(catch)]
+    pub fn windows_get(id: i32, populate: bool) -> Result<js_sys::Promise, JsValue>;
+
+    #[wasm_bindgen(catch)]
+    pub fn windows_current(populate: bool) -> Result<js_sys::Promise, JsValue>;
+
+    #[wasm_bindgen(catch)]
+    pub fn windows_last_focused(populate: bool) -> Result<js_sys::Promise, JsValue>;
+
+    #[wasm_bindgen(catch)]
+    pub fn windows_all(populate: bool) -> Result<js_sys::Promise, JsValue>;
+
+    #[wasm_bindgen(catch)]
+    pub fn windows_create(data: &JsValue) -> Result<js_sys::Promise, JsValue>;
+
+    #[wasm_bindgen(catch)]
+    pub fn windows_update(id: i32, info: &JsValue) -> Result<js_sys::Promise, JsValue>;
+
+    #[wasm_bindgen(catch)]
+    pub fn windows_remove(id: i32) -> Result<js_sys::Promise, JsValue>;
+
+    #[wasm_bindgen(js_name = on_windows_created)]
+    pub fn chrome_windows_on_created_add_listener(callback: &Closure<dyn FnMut(JsValue)>);
+
+    #[wasm_bindgen(js_name = on_windows_removed)]
+    pub fn chrome_windows_on_removed_add_listener(callback: &Closure<dyn FnMut(JsValue)>);
+
+    #[wasm_bindgen(js_name = on_windows_focus_changed)]
+    pub fn chrome_windows_on_focus_changed_add_listener(callback: &Closure<dyn FnMut(JsValue)>);
+
+    #[wasm_bindgen(js_name = on_windows_bounds_changed)]
+    pub fn chrome_windows_on_bounds_changed_add_listener(callback: &Closure<dyn FnMut(JsValue)>);
+}

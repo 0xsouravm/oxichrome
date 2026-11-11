@@ -6,6 +6,7 @@ use wasm_bindgen::JsValue;
 use wasm_bindgen_futures::JsFuture;
 
 use crate::error::{JsError, OxichromeError, Result};
+use std::result::Result as StdResult;
 use crate::js_bridge;
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -197,7 +198,7 @@ fn report_panics() {
 }
 
 #[doc(hidden)]
-pub async fn __run_export<A: DeserializeOwned, R: Serialize, F, Fut>(name: &str, arg: JsValue, f: F) -> std::result::Result<JsValue, JsValue>
+pub async fn __run_export<A: DeserializeOwned, R: Serialize, F, Fut>(name: &str, arg: JsValue, f: F) -> StdResult<JsValue, JsValue>
 where
     F: FnOnce(A) -> Fut,
     Fut: std::future::Future<Output = R>,

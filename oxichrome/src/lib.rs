@@ -17,6 +17,7 @@ pub use oxichrome_core::runtime;
 pub use oxichrome_core::scripting;
 pub use oxichrome_core::storage;
 pub use oxichrome_core::tabs;
+pub use oxichrome_core::windows;
 
 pub use oxichrome_core::log;
 pub use oxichrome_core::__log_impl;
@@ -48,5 +49,6 @@ pub mod prelude {
     pub use crate::scripting;
     pub use crate::storage;
     pub use crate::tabs;
+    pub use crate::windows;
     pub use serde::{Serialize, Deserialize};
 }

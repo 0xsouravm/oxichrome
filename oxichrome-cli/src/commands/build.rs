@@ -113,6 +113,15 @@ pub fn run(release: bool, browser: Browser) -> Result<()> {
         );
     }
 
+    let left_out_events = shims::left_out_events(&metadata, browser);
+    if !left_out_events.is_empty() {
+        println!(
+            "[oxichrome] Note: Firefox doesn't have {}, so {} never {} there",
+            if left_out_events.len() == 1 { "that event" } else { "those events" },
+            left_out_events.join(", "),
+            if left_out_events.len() == 1 { "runs" } else { "run" }
+        );
+    }
     let background_js = shims::generate_background_js(&metadata, &crate_name);
     fs::write(dist_dir.join("background.js"), &background_js)
         .context("failed to write background.js")?;

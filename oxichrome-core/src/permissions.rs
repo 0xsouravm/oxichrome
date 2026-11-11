@@ -9,6 +9,7 @@ use wasm_bindgen::JsValue;
 use wasm_bindgen_futures::JsFuture;
 
 use crate::error::{JsError, OxichromeError, Result};
+use std::result::Result as StdResult;
 use crate::event::{events, EventArg, FromEventArg};
 use crate::js_bridge;
 
@@ -140,13 +141,13 @@ impl std::fmt::Display for Permission {
 }
 
 impl Serialize for Permission {
-    fn serialize<S: Serializer>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error> {
+    fn serialize<S: Serializer>(&self, serializer: S) -> StdResult<S::Ok, S::Error> {
         serializer.serialize_str(self.name())
     }
 }
 
 impl<'de> Deserialize<'de> for Permission {
-    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> std::result::Result<Self, D::Error> {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> StdResult<Self, D::Error> {
         let name = String::deserialize(deserializer)?;
         Permission::from_name(&name)
             .ok_or_else(|| serde::de::Error::custom(format!("unknown permission `{name}`")))
@@ -168,7 +169,7 @@ struct RawSet {
 }
 
 impl<'de> Deserialize<'de> for PermissionSet {
-    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> std::result::Result<Self, D::Error> {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> StdResult<Self, D::Error> {
         let raw = RawSet::deserialize(deserializer)?;
         let mut permissions: Vec<Permission> = raw
             .permissions

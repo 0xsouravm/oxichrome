@@ -508,6 +508,17 @@ let tab: Tab = oxichrome::tabs::get(tab_id).await?;
 let tab: Tab = oxichrome::tabs::update(tab_id, &props).await?;
 oxichrome::tabs::remove(tab_id).await?;
 oxichrome::tabs::send_message(tab_id, &msg).await?;
+let tab: oxichrome::tabs::Tab = oxichrome::tabs::get(tab_id).await?; // a typed tab: id, window_id, url, title, active, ...
+
+// Windows
+use oxichrome::windows::{self, NewWindow, WindowState, WindowUpdate};
+let window = windows::create(NewWindow::new().url("panel.html").popup().size(420, 600).position(40, 40)).await?;
+windows::create(NewWindow::new().url("https://example.org").url("https://example.com").focused(false)).await?;
+windows::create(NewWindow::new().tab(tab_id)).await?; // moves the tab into a new window
+windows::update(window.id, WindowUpdate::new().state(WindowState::Maximized)).await?;
+windows::update(window.id, WindowUpdate::new().size(500, 400).draw_attention(true)).await?;
+let current = windows::current_with_tabs().await?;   // also get, get_with_tabs, last_focused, get_all, get_all_with_tabs
+windows::remove(window.id).await?;
 
 // Runtime
 let url = oxichrome::runtime::get_url("icon.png");
@@ -551,6 +562,22 @@ Notification::basic("icon.png", "Reminder", "Standup")
 ```
 
 Values you pass to `storage`, `tabs` and `runtime`, and the values you read back, follow `serde_json`'s rules, so a struct, a `HashMap` (integer keys too) or `serde_json::json!({...})` arrives in the browser as the plain object you'd expect, in both browsers.
+
+A `Window` has `id`, `kind` (`Normal`, `Popup`, ...), `state`, `focused`, `incognito`, the bounds, `title` (Firefox only) and, from the `_with_tabs` functions, `tabs`. Browsers refuse some combinations with a vague "Invalid value for state", so these return `InvalidArgument` before reaching the browser: a size or position together with `Minimized`, `Maximized` or `Fullscreen`; `focused(true)` with `Minimized`; `focused(false)` with `Maximized` or `Fullscreen`; a `javascript:` URL; both `tab` and `url`; and an empty update. Creating an `incognito()` window that the user hasn't allowed the extension into returns `Err` in both browsers (Chrome would hand back nothing). `title_preface` is Firefox only, and Chrome builds drop it. Firefox refuses `about:`, `chrome:` and `file:` URLs; Chrome opens them.
+
+```rust
+#[oxichrome::on(windows::on_created)]
+async fn created(window: Window) {}
+
+#[oxichrome::on(windows::on_removed)]
+async fn removed(window_id: i32) {}
+
+#[oxichrome::on(windows::on_focus_changed)]
+async fn focus(window_id: Option<i32>) {} // None when no browser window has focus
+
+#[oxichrome::on(windows::on_bounds_changed)]
+async fn resized(window: Window) {} // Chrome only; the Firefox build says it never runs there
+```
 
 `chrome.action` needs `action` in the manifest. oxichrome adds it when your extension has a `#[popup]` or an `#[on(action::on_clicked)]` handler. The click event doesn't fire while a popup is set.
 

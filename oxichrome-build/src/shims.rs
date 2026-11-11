@@ -202,6 +202,24 @@ chrome.commands.onCommand.addListener((name, tab) => {{
     )
 }
 
+pub const CHROME_ONLY_EVENTS: &[&str] = &["windows.onBoundsChanged"];
+
+pub fn left_out_events(metadata: &ExtensionMetadata, browser: crate::Browser) -> Vec<String> {
+    if browser != crate::Browser::Firefox {
+        return Vec::new();
+    }
+    let mut left_out: Vec<String> = metadata
+        .event_handlers
+        .iter()
+        .filter(|handler| {
+            CHROME_ONLY_EVENTS.contains(&format!("{}.{}", snake_to_camel(&handler.namespace), snake_to_camel(&handler.event_name)).as_str())
+        })
+        .map(|handler| format!("`{}` (`{}::{}`)", handler.fn_name, handler.namespace, handler.event_name))
+        .collect();
+    left_out.sort();
+    left_out
+}
+
 fn generate_listeners(metadata: &ExtensionMetadata) -> String {
     let mut events: Vec<(String, Vec<String>)> = Vec::new();
     for handler in &metadata.event_handlers {
@@ -277,9 +295,17 @@ self.addEventListener('unhandledrejection', (event) => releaseRepliesOnTrap(even
 }});
 "#
             ));
-        } else {
+        } else if event == "chrome.windows.onFocusChanged" {
             listeners.push_str(&format!(
-                r#"{event}.addListener((...args) => {{
+                r#"{event}.addListener((id) => {{
+    dispatch(() => [{handlers}].forEach((handler) => handler(id === chrome.windows.WINDOW_ID_NONE ? null : id)));
+}});
+"#
+            ));
+        } else {
+            let call = if CHROME_ONLY_EVENTS.contains(&event.trim_start_matches("chrome.")) { "?.addListener" } else { ".addListener" };
+            listeners.push_str(&format!(
+                r#"{event}{call}((...args) => {{
     dispatch(() => [{handlers}].forEach((handler) => handler(...args)));
 }});
 "#

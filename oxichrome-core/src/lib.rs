@@ -14,5 +14,6 @@ pub mod runtime;
 pub mod scripting;
 pub mod storage;
 pub mod tabs;
+pub mod windows;
 
 pub use js_bridge::__log_impl;
