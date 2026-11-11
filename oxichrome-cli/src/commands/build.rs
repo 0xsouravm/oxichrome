@@ -131,7 +131,7 @@ pub fn run(release: bool, browser: Browser) -> Result<()> {
     println!("[oxichrome] Generated background.js");
 
     if metadata.has_popup {
-        let popup_html = shims::generate_popup_html();
+        let popup_html = shims::generate_popup_html(&metadata.popup_styles);
         fs::write(dist_dir.join("popup.html"), &popup_html)
             .context("failed to write popup.html")?;
         let popup_js = shims::generate_popup_js(&crate_name);
@@ -140,7 +140,7 @@ pub fn run(release: bool, browser: Browser) -> Result<()> {
     }
 
     if metadata.side_panel.is_some() {
-        fs::write(dist_dir.join("sidepanel.html"), shims::generate_side_panel_html())
+        fs::write(dist_dir.join("sidepanel.html"), shims::generate_side_panel_html(&metadata.side_panel.as_ref().map(|panel| panel.styles.clone()).unwrap_or_default()))
             .context("failed to write sidepanel.html")?;
         fs::write(dist_dir.join("sidepanel.js"), shims::generate_side_panel_js(&crate_name))
             .context("failed to write sidepanel.js")?;
@@ -148,7 +148,7 @@ pub fn run(release: bool, browser: Browser) -> Result<()> {
     }
 
     if metadata.has_options_page {
-        let options_html = shims::generate_options_html();
+        let options_html = shims::generate_options_html(&metadata.options_styles);
         fs::write(dist_dir.join("options.html"), &options_html)
             .context("failed to write options.html")?;
         let options_js = shims::generate_options_js(&crate_name);
@@ -173,6 +173,16 @@ pub fn run(release: bool, browser: Browser) -> Result<()> {
     if static_dir.is_dir() {
         println!("[oxichrome] Copying static assets...");
         copy_dir_recursive(&static_dir, &dist_dir).context("failed to copy static assets")?;
+    }
+    let linked = metadata
+        .popup_styles
+        .iter()
+        .chain(&metadata.options_styles)
+        .chain(metadata.side_panel.iter().flat_map(|panel| &panel.styles));
+    for style in linked {
+        if !dist_dir.join(style).is_file() {
+            bail!("`static/{style}` is linked as a stylesheet but wasn't copied; add it to `static/`");
+        }
     }
 
     if command_in_path("wasm-opt") {

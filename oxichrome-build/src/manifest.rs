@@ -397,6 +397,8 @@ mod tests {
             has_popup: true,
             has_options_page: true,
             side_panel: None,
+            popup_styles: Vec::new(),
+            options_styles: Vec::new(),
             content_scripts: vec![],
             gecko_id: None,
             display_name: None,
@@ -444,6 +446,8 @@ mod tests {
             has_popup: false,
             has_options_page: false,
             side_panel: None,
+            popup_styles: Vec::new(),
+            options_styles: Vec::new(),
             content_scripts: vec![ContentScript {
                 fn_name: "inject".to_string(),
                 export: "__oxichrome_cs_inject".to_string(),
@@ -493,6 +497,8 @@ mod tests {
             has_popup: false,
             has_options_page: false,
             side_panel: None,
+            popup_styles: Vec::new(),
+            options_styles: Vec::new(),
             content_scripts: vec![ContentScript {
                 fn_name: "inject".to_string(),
                 export: "__oxichrome_cs_inject".to_string(),
@@ -566,6 +572,8 @@ mod tests {
             has_popup: false,
             has_options_page: false,
             side_panel: None,
+            popup_styles: Vec::new(),
+            options_styles: Vec::new(),
             content_scripts: vec![],
         };
         let json = generate_manifest(&metadata, Browser::Chromium).unwrap();

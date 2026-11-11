@@ -10,6 +10,7 @@ use crate::metadata;
 #[derive(Default)]
 struct Args {
     title: Option<Text>,
+    styles: Vec<crate::codegen::page::Style>,
     open_on_action_click: bool,
 }
 
@@ -26,6 +27,7 @@ impl Parse for Args {
                     input.parse::<syn::Token![=]>()?;
                     args.title = Some(Text::parse_field(input, "title")?);
                 }
+                "style" => crate::codegen::page::parse_styles(input, &mut args.styles, &key)?,
                 "open_on_action_click" => {
                     if args.open_on_action_click {
                         return Err(syn::Error::new(key.span(), "`open_on_action_click` is set twice"));
@@ -50,7 +52,7 @@ impl Parse for Args {
                 other => {
                     return Err(syn::Error::new(
                         key.span(),
-                        format!("unknown side panel option `{other}`; use `title = \"...\"` or `open_on_action_click`"),
+                        format!("unknown side panel option `{other}`; use `title = \"...\"`, `open_on_action_click` or `style = \"file.css\"`"),
                     ))
                 }
             }
@@ -80,16 +82,19 @@ pub fn expand(attr: TokenStream, item: TokenStream, order: Order) -> Result<Toke
 
     let at = format!("{}:{}:{}", order.file, order.line, order.column);
     let checks = args.title.as_ref().map(|title| title.checks(&at)).unwrap_or_default();
+    let style_checks = crate::codegen::page::check_files(&args.styles)?;
     let entry = metadata::emit(serde_json::json!({
         "kind": "side_panel",
         "fn_name": fn_name.to_string(),
         "title": args.title.as_ref().map(Text::value),
         "open_on_action_click": args.open_on_action_click,
+        "styles": crate::codegen::page::paths(&args.styles),
     }));
 
     Ok(quote! {
         #entry
         #checks
+        #style_checks
 
         #(#attrs)*
         #[::leptos::component]

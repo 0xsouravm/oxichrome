@@ -22,6 +22,8 @@ pub struct ExtensionMetadata {
     pub event_handlers: Vec<EventHandler>,
     pub has_popup: bool,
     pub has_options_page: bool,
+    pub popup_styles: Vec<String>,
+    pub options_styles: Vec<String>,
     pub side_panel: Option<SidePanel>,
     pub content_scripts: Vec<ContentScript>,
     pub gecko_id: Option<String>,
@@ -38,6 +40,8 @@ pub struct SidePanel {
     pub title: Option<String>,
     #[serde(default)]
     pub open_on_action_click: bool,
+    #[serde(default)]
+    pub styles: Vec<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq)]
@@ -179,9 +183,13 @@ enum Entry {
     },
     Popup {
         fn_name: String,
+        #[serde(default)]
+        styles: Vec<String>,
     },
     OptionsPage {
         fn_name: String,
+        #[serde(default)]
+        styles: Vec<String>,
     },
     SidePanel {
         fn_name: String,
@@ -361,8 +369,14 @@ pub fn parse_entries(text: &str) -> anyhow::Result<ExtensionMetadata> {
                 namespace,
                 event_name,
             }),
-            Entry::Popup { fn_name } => popups.push(fn_name),
-            Entry::OptionsPage { fn_name } => options_pages.push(fn_name),
+            Entry::Popup { fn_name, styles } => {
+                metadata.popup_styles = styles;
+                popups.push(fn_name)
+            }
+            Entry::OptionsPage { fn_name, styles } => {
+                metadata.options_styles = styles;
+                options_pages.push(fn_name)
+            }
             Entry::SidePanel { fn_name, panel } => side_panels.push((fn_name, panel)),
             Entry::ContentScript {
                 fn_name,
@@ -841,7 +855,7 @@ mod tests {
         let event = |namespace: &str, event: &str| format!("{{\"kind\":\"event\",\"fn_name\":\"f\",\"export\":\"e\",\"namespace\":\"{namespace}\",\"event_name\":\"{event}\"}}");
         let parse = |lines: &[String]| parse_entries(&format!("{EXTENSION}\n{}", lines.join("\n")));
         let ok = parse(&[panel(true)]).unwrap();
-        assert_eq!(ok.side_panel, Some(SidePanel { title: None, open_on_action_click: true }));
+        assert_eq!(ok.side_panel, Some(SidePanel { title: None, open_on_action_click: true, styles: Vec::new() }));
         let err = parse(&[panel(false), panel(false).replace("Panel", "Other")]).unwrap_err().to_string();
         assert!(err.contains("only one side panel") && err.contains("Other, Panel"), "{err}");
         let err = parse(&[panel(true), "{\"kind\":\"popup\",\"fn_name\":\"Pop\"}".to_string()]).unwrap_err().to_string();

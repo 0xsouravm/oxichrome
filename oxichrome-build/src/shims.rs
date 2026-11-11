@@ -416,20 +416,22 @@ start();
     )
 }
 
-pub fn generate_popup_html() -> String {
-    r#"<!DOCTYPE html>
+pub fn generate_popup_html(styles: &[String]) -> String {
+    let links: String = styles.iter().map(|style| format!("<link rel=\"stylesheet\" href=\"{style}\">\n")).collect();
+    format!(
+        r#"<!DOCTYPE html>
 <html>
 <head>
 <meta charset="UTF-8">
 <meta name="color-scheme" content="light dark">
-<style>html, body { margin: 0; padding: 0; min-width: 240px; min-height: 120px; }</style>
-</head>
+<style>html, body {{ margin: 0; padding: 0; min-width: 240px; min-height: 120px; }}</style>
+{links}</head>
 <body>
 <script type="module" src="popup.js"></script>
 </body>
 </html>
 "#
-    .to_string()
+    )
 }
 
 pub fn generate_popup_js(crate_name: &str) -> String {
@@ -450,20 +452,22 @@ try {{
     )
 }
 
-pub fn generate_side_panel_html() -> String {
-    r#"<!DOCTYPE html>
+pub fn generate_side_panel_html(styles: &[String]) -> String {
+    let links: String = styles.iter().map(|style| format!("<link rel=\"stylesheet\" href=\"{style}\">\n")).collect();
+    format!(
+        r#"<!DOCTYPE html>
 <html>
 <head>
 <meta charset="UTF-8">
 <meta name="color-scheme" content="light dark">
-<style>html, body { margin: 0; padding: 0; }</style>
-</head>
+<style>html, body {{ margin: 0; padding: 0; }}</style>
+{links}</head>
 <body>
 <script type="module" src="sidepanel.js"></script>
 </body>
 </html>
 "#
-    .to_string()
+    )
 }
 
 pub fn generate_side_panel_js(crate_name: &str) -> String {
@@ -484,20 +488,22 @@ try {{
     )
 }
 
-pub fn generate_options_html() -> String {
-    r#"<!DOCTYPE html>
+pub fn generate_options_html(styles: &[String]) -> String {
+    let links: String = styles.iter().map(|style| format!("<link rel=\"stylesheet\" href=\"{style}\">\n")).collect();
+    format!(
+        r#"<!DOCTYPE html>
 <html>
 <head>
 <meta charset="UTF-8">
 <meta name="color-scheme" content="light dark">
-<style>html, body { margin: 0; padding: 0; }</style>
-</head>
+<style>html, body {{ margin: 0; padding: 0; }}</style>
+{links}</head>
 <body>
 <script type="module" src="options.js"></script>
 </body>
 </html>
 "#
-    .to_string()
+    )
 }
 
 pub fn generate_options_js(crate_name: &str) -> String {
@@ -566,6 +572,8 @@ mod tests {
             has_popup: false,
             has_options_page: false,
             side_panel: None,
+            popup_styles: Vec::new(),
+            options_styles: Vec::new(),
             content_scripts: vec![],
             gecko_id: None,
             display_name: None,
@@ -613,6 +621,8 @@ mod tests {
             has_popup: false,
             has_options_page: false,
             side_panel: None,
+            popup_styles: Vec::new(),
+            options_styles: Vec::new(),
             content_scripts: vec![],
             gecko_id: None,
             display_name: None,
@@ -740,7 +750,7 @@ mod tests {
 
     #[test]
     fn test_popup_html() {
-        let html = generate_popup_html();
+        let html = generate_popup_html(&[]);
         assert!(html.contains("src=\"popup.js\""));
         assert!(html.contains("min-width: 240px"));
         assert!(!html.contains("import init"));
@@ -756,7 +766,7 @@ mod tests {
 
     #[test]
     fn test_options_html() {
-        let html = generate_options_html();
+        let html = generate_options_html(&[]);
         assert!(html.contains("src=\"options.js\""));
         assert!(!html.contains("import init"));
     }
@@ -877,13 +887,25 @@ mod tests {
             "the Firefox listener must call toggle right away, not through dispatch: {js}"
         );
         assert!(generate_side_panel_js("my-ext").contains("import init, { __oxichrome_mount_side_panel } from './wasm/my_ext.js'"));
-        assert!(generate_side_panel_html().contains("src=\"sidepanel.js\""));
+        assert!(generate_side_panel_html(&[]).contains("src=\"sidepanel.js\""));
     }
 
     #[test]
     fn pages_follow_the_browser_theme() {
-        for html in [generate_popup_html(), generate_options_html(), generate_side_panel_html()] {
+        for html in [generate_popup_html(&[]), generate_options_html(&[]), generate_side_panel_html(&[])] {
             assert!(html.contains(r#"<meta name="color-scheme" content="light dark">"#), "{html}");
         }
+    }
+
+    #[test]
+    fn pages_link_their_stylesheets_after_the_base_style() {
+        let styles = ["base.css".to_string(), "css/popup.css".to_string()];
+        for html in [generate_popup_html(&styles), generate_options_html(&styles), generate_side_panel_html(&styles)] {
+            let base = html.find("<style>").unwrap();
+            let first = html.find(r#"<link rel="stylesheet" href="base.css">"#).unwrap();
+            let second = html.find(r#"<link rel="stylesheet" href="css/popup.css">"#).unwrap();
+            assert!(base < first && first < second && second < html.find("</head>").unwrap(), "{html}");
+        }
+        assert!(!generate_popup_html(&[]).contains("<link"));
     }
 }

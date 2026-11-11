@@ -48,8 +48,8 @@ pub fn on(attr: TokenStream, item: TokenStream) -> TokenStream {
 /// }
 /// ```
 #[proc_macro_attribute]
-pub fn popup(_attr: TokenStream, item: TokenStream) -> TokenStream {
-    codegen::popup::expand(item.into())
+pub fn popup(attr: TokenStream, item: TokenStream) -> TokenStream {
+    codegen::popup::expand(attr.into(), item.into())
         .unwrap_or_else(|e| e.into_compile_error())
         .into()
 }
@@ -61,8 +61,8 @@ pub fn popup(_attr: TokenStream, item: TokenStream) -> TokenStream {
 /// }
 /// ```
 #[proc_macro_attribute]
-pub fn options_page(_attr: TokenStream, item: TokenStream) -> TokenStream {
-    codegen::options_page::expand(item.into())
+pub fn options_page(attr: TokenStream, item: TokenStream) -> TokenStream {
+    codegen::options_page::expand(attr.into(), item.into())
         .unwrap_or_else(|e| e.into_compile_error())
         .into()
 }

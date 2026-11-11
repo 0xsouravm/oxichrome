@@ -4,8 +4,10 @@ use quote::quote;
 use crate::metadata;
 use syn::ItemFn;
 
-pub fn expand(item: TokenStream) -> Result<TokenStream, syn::Error> {
+pub fn expand(attr: TokenStream, item: TokenStream) -> Result<TokenStream, syn::Error> {
+    let styles = crate::codegen::page::parse_page_args(attr, "popup")?;
     let func: ItemFn = syn::parse2(item)?;
+    let style_checks = crate::codegen::page::check_files(&styles)?;
 
     let fn_name = &func.sig.ident;
     let fn_body = &func.block;
@@ -17,10 +19,12 @@ pub fn expand(item: TokenStream) -> Result<TokenStream, syn::Error> {
     let entry = metadata::emit(serde_json::json!({
         "kind": "popup",
         "fn_name": fn_name.to_string(),
+        "styles": crate::codegen::page::paths(&styles),
     }));
 
     Ok(quote! {
         #entry
+        #style_checks
 
         #(#attrs)*
         #[::leptos::component]

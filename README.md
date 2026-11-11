@@ -213,6 +213,23 @@ fn Options() -> impl IntoView {
 }
 ```
 
+### Styling pages
+
+The popup, options page and side panel take `style`: one stylesheet or a list, from your `static/` folder. They're linked in the page's `<head>`, so the CSS is in place before your component renders and nothing flashes unstyled. Later files override earlier ones.
+
+```rust
+#[oxichrome::popup(style = "popup.css")]
+fn Popup() -> impl IntoView { view! { <p class="hello">"Hello."</p> } }
+
+#[oxichrome::options_page(style = ["base.css", "css/options.css"])]
+fn Options() -> impl IntoView { view! { <h1>"Settings"</h1> } }
+
+#[oxichrome::side_panel(title = "Notes", style = "base.css")]
+fn Notes() -> impl IntoView { view! { <h1>"Notes"</h1> } }
+```
+
+A missing file, a URL, a path outside `static/` or a file that isn't `.css` is a compile error, and editing a stylesheet rebuilds the extension. With Tailwind or another tool, write its output into `static/` and list that file. Without any CSS, pages follow the browser's light or dark theme.
+
 ### `#[oxichrome::side_panel(...)]`
 
 Marks a Leptos component as the side panel: Chrome's side panel and Firefox's sidebar, from the same code.
