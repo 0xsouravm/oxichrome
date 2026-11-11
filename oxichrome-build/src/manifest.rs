@@ -11,6 +11,8 @@ struct Manifest {
     version: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     description: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    default_locale: Option<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     permissions: Vec<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -112,6 +114,20 @@ fn for_browser(names: &[String], metadata: &ExtensionMetadata, browser: Browser)
         .collect()
 }
 
+pub fn generated_gecko_id(name: &str) -> String {
+    let mut local = String::new();
+    for c in name.to_lowercase().chars() {
+        if c.is_ascii_alphanumeric() || c == '.' || c == '_' {
+            local.push(c);
+        } else if !local.ends_with('-') {
+            local.push('-');
+        }
+    }
+    let local = local.trim_matches(|c| c == '-' || c == '.');
+    let local = if local.is_empty() { "extension" } else { local };
+    format!("{local}@oxichrome.dev")
+}
+
 pub fn generate_manifest(metadata: &ExtensionMetadata, browser: Browser) -> anyhow::Result<String> {
     let name = metadata
         .name
@@ -127,6 +143,7 @@ pub fn generate_manifest(metadata: &ExtensionMetadata, browser: Browser) -> anyh
         name: name.to_string(),
         version: version.to_string(),
         description: metadata.description.clone(),
+        default_locale: metadata.default_locale.clone(),
         permissions: {
             let mut permissions = for_browser(&metadata.permissions, metadata, browser);
             if !metadata.menus.is_empty() && !permissions.iter().any(|p| p == "contextMenus") {
@@ -234,7 +251,7 @@ pub fn generate_manifest(metadata: &ExtensionMetadata, browser: Browser) -> anyh
         let gecko_id = metadata
             .gecko_id
             .clone()
-            .unwrap_or_else(|| format!("{}@oxichrome.dev", name.to_lowercase().replace(' ', "-")));
+            .unwrap_or_else(|| generated_gecko_id(metadata.display_name.as_deref().unwrap_or(name)));
         obj.insert(
             "browser_specific_settings".to_string(),
             serde_json::json!({
@@ -252,6 +269,14 @@ pub fn generate_manifest(metadata: &ExtensionMetadata, browser: Browser) -> anyh
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn generated_gecko_ids_are_valid() {
+        assert_eq!(generated_gecko_id("My Extension"), "my-extension@oxichrome.dev");
+        assert_eq!(generated_gecko_id("Café & Tabs!"), "caf-tabs@oxichrome.dev");
+        assert_eq!(generated_gecko_id("v1.2 tool_x"), "v1.2-tool_x@oxichrome.dev");
+        assert_eq!(generated_gecko_id("日本語"), "extension@oxichrome.dev");
+    }
 
     #[test]
     fn test_icons_and_action_in_manifest() {
@@ -315,6 +340,9 @@ mod tests {
             has_options_page: true,
             content_scripts: vec![],
             gecko_id: None,
+            display_name: None,
+            default_locale: None,
+            messages: Vec::new(),
             icons: vec![],
             action: None,
             menus: vec![],
@@ -365,6 +393,9 @@ mod tests {
                 css: vec![],
             }],
             gecko_id: None,
+            display_name: None,
+            default_locale: None,
+            messages: Vec::new(),
             icons: vec![],
             action: None,
             menus: vec![],
@@ -410,6 +441,9 @@ mod tests {
                 css: vec!["styles.css".to_string()],
             }],
             gecko_id: None,
+            display_name: None,
+            default_locale: None,
+            messages: Vec::new(),
             icons: vec![],
             action: None,
             menus: vec![],
@@ -450,6 +484,9 @@ mod tests {
             version: Some("1.0.0".to_string()),
             description: None,
             gecko_id: None,
+            display_name: None,
+            default_locale: None,
+            messages: Vec::new(),
             icons: vec![],
             action: None,
             menus: vec![],

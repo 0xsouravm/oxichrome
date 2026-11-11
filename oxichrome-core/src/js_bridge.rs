@@ -375,3 +375,37 @@ extern "C" {
     #[wasm_bindgen(js_name = on_permissions_removed)]
     pub fn chrome_permissions_on_removed_add_listener(callback: &Closure<dyn FnMut(JsValue)>);
 }
+
+#[wasm_bindgen(inline_js = r#"
+function api() {
+    return globalThis.browser?.i18n ?? globalThis.chrome.i18n;
+}
+
+export function i18n_message(key, substitutions) {
+    const text = api().getMessage(key, substitutions);
+    return typeof text === 'string' ? text : '';
+}
+
+export function i18n_ui_language() {
+    return api().getUILanguage();
+}
+
+export function i18n_accept_languages() {
+    return Promise.resolve(api().getAcceptLanguages());
+}
+
+export function i18n_detect_language(text) {
+    return Promise.resolve(api().detectLanguage(text));
+}
+"#)]
+extern "C" {
+    pub fn i18n_message(key: &str, substitutions: Vec<String>) -> String;
+
+    pub fn i18n_ui_language() -> String;
+
+    #[wasm_bindgen(catch)]
+    pub fn i18n_accept_languages() -> Result<js_sys::Promise, JsValue>;
+
+    #[wasm_bindgen(catch)]
+    pub fn i18n_detect_language(text: &str) -> Result<js_sys::Promise, JsValue>;
+}

@@ -5,6 +5,7 @@ pub mod context_menus;
 pub mod content_script;
 pub mod error;
 pub mod event;
+pub mod i18n;
 pub mod js_bridge;
 mod json;
 pub mod notifications;

@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use syn::{ItemStruct, LitStr};
 
 use crate::metadata;
-use crate::parse::{normalize_icon_path, png_dimensions, ExtensionArgs, IconSpec};
+use crate::parse::{normalize_icon_path, png_dimensions, ExtensionArgs, IconSpec, Text};
 
 fn find_exact(root: &Path, relative: &str) -> Result<PathBuf, String> {
     let mut current = root.to_path_buf();
@@ -60,20 +60,56 @@ fn check_icon(path: &LitStr) -> syn::Result<TokenStream> {
     })
 }
 
+fn check_locales(args: &ExtensionArgs) -> syn::Result<(TokenStream, String)> {
+    let locales = crate::i18n::load().map_err(|err| {
+        syn::Error::new(args.default_locale.as_ref().map(LitStr::span).unwrap_or_else(proc_macro2::Span::call_site), err)
+    })?;
+    let mut texts: Vec<&Text> = vec![&args.name];
+    texts.extend(args.description.as_ref());
+    texts.extend(args.action.as_ref().and_then(|action| action.default_title.as_ref()));
+    let display_name = match &args.default_locale {
+        None => {
+            if let Some(Text::Message { span, .. }) = texts.iter().find(|text| matches!(text, Text::Message { .. })) {
+                return Err(syn::Error::new(*span, "add `default_locale = \"en\"` (or the language your messages are in) to use messages here"));
+            }
+            if locales.exists {
+                return Err(syn::Error::new(
+                    proc_macro2::Span::call_site(),
+                    "`static/_locales` is there, so add `default_locale = \"en\"` (or the language your messages are in); Chrome refuses to load the extension without it",
+                ));
+            }
+            args.name.value()
+        }
+        Some(default) => {
+            locales.check_default(&default.value()).map_err(|err| syn::Error::new(default.span(), err))?;
+            let base = locales.get(&default.value()).expect("checked");
+            for text in &texts {
+                if let Text::Message { key, span, .. } = text {
+                    if !base.messages.iter().any(|message| &message.key == key) {
+                        return Err(syn::Error::new(*span, format!("`{key}` isn't in the default locale `{}`; add it to `static/_locales/{}/messages.json`", default.value(), default.value())));
+                    }
+                }
+            }
+            match &args.name {
+                Text::Literal(text) => text.value(),
+                Text::Message { key, .. } => base.messages.iter().find(|message| &message.key == key).expect("checked").text.clone(),
+            }
+        }
+    };
+    let mut checks = crate::i18n::tracking(&locales);
+    for text in texts {
+        checks.extend(text.checks("#[oxichrome::extension]"));
+    }
+    Ok((checks, display_name))
+}
+
 pub fn expand(attr: TokenStream, item: TokenStream) -> Result<TokenStream, syn::Error> {
     let args: ExtensionArgs = syn::parse2(attr)?;
     let item_struct: ItemStruct = syn::parse2(item)?;
 
-    let name = &args.name;
     let version = &args.version;
+    let (locale_checks, display_name) = check_locales(&args)?;
 
-    let description = match &args.description {
-        Some(desc) => quote! { Some(#desc) },
-        None => quote! { None::<&str> },
-    };
-
-    let permissions: Vec<&str> = args.permissions.iter().map(|declared| declared.info.name).collect();
-    let host_permissions: Vec<_> = args.host_permissions.iter().collect();
     let permission_checks = args.permissions.iter().chain(&args.optional_permissions).map(|declared| {
         let ident = &declared.ident;
         quote! {
@@ -116,7 +152,7 @@ pub fn expand(attr: TokenStream, item: TokenStream) -> Result<TokenStream, syn::
     let action = match &args.action {
         None => serde_json::Value::Null,
         Some(action) => serde_json::json!({
-            "default_title": action.default_title.as_ref().map(LitStr::value),
+            "default_title": action.default_title.as_ref().map(Text::value),
             "default_icon": match &action.default_icon {
                 None => serde_json::Value::Null,
                 Some(IconSpec::Single(path)) => serde_json::json!(normalize_icon_path(path)?),
@@ -127,9 +163,11 @@ pub fn expand(attr: TokenStream, item: TokenStream) -> Result<TokenStream, syn::
     };
     let entry = metadata::emit(serde_json::json!({
         "kind": "extension",
-        "name": name.value(),
+        "name": args.name.value(),
+        "display_name": display_name,
+        "default_locale": args.default_locale.as_ref().map(LitStr::value),
         "version": version.value(),
-        "description": args.description.as_ref().map(LitStr::value),
+        "description": args.description.as_ref().map(Text::value),
         "gecko_id": args.gecko_id.as_ref().map(LitStr::value),
         "permissions": names(&args.permissions),
         "optional_permissions": names(&args.optional_permissions),
@@ -148,29 +186,12 @@ pub fn expand(attr: TokenStream, item: TokenStream) -> Result<TokenStream, syn::
 
         #(#icon_checks)*
         #(#permission_checks)*
-
-        #[doc(hidden)]
-        #[allow(non_upper_case_globals)]
-        mod __oxichrome_meta {
-            pub const NAME: &str = #name;
-            pub const VERSION: &str = #version;
-            pub const DESCRIPTION: Option<&str> = #description;
-            pub const PERMISSIONS: &[&str] = &[#(#permissions),*];
-            pub const HOST_PERMISSIONS: &[&str] = &[#(#host_permissions),*];
-        }
-
-        #[doc(hidden)]
-        #[allow(dead_code)]
-        const __OXICHROME_EXTENSION_MARKER: &str = concat!(
-            "__OXICHROME__",
-            #name, "__",
-            #version, "__",
-        );
+        #locale_checks
 
         impl #struct_name {
             #[allow(dead_code)]
             pub fn name() -> &'static str {
-                #name
+                #display_name
             }
 
             #[allow(dead_code)]

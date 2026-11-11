@@ -34,6 +34,7 @@ pub fn run(release: bool, browser: Browser) -> Result<()> {
 
     let status = Command::new("cargo")
         .args(&cargo_args)
+        .env("OXICHROME_LOCALES", locale_folders(&crate_dir))
         .status()
         .context("failed to run cargo build")?;
 
@@ -56,6 +57,11 @@ pub fn run(release: bool, browser: Browser) -> Result<()> {
     let section = metadata::read_section(&wasm_bytes)
         .with_context(|| format!("failed to read extension metadata from {}", wasm_file.display()))?;
     let metadata = metadata::parse_entries(&section)?;
+    let default_keys = match &metadata.default_locale {
+        Some(default) => Some(message_keys(&crate_dir, default)?),
+        None => None,
+    };
+    metadata::check_messages(&metadata, default_keys.as_deref())?;
 
     let browser_dir = match browser {
         Browser::Chromium => "chromium",
@@ -139,6 +145,10 @@ pub fn run(release: bool, browser: Browser) -> Result<()> {
         println!("[oxichrome] Generated {cs_filename}");
     }
 
+    let stale_locales = dist_dir.join("_locales");
+    if stale_locales.exists() {
+        fs::remove_dir_all(&stale_locales).context("failed to clear dist/_locales")?;
+    }
     let static_dir = crate_dir.join("static");
     if static_dir.is_dir() {
         println!("[oxichrome] Copying static assets...");
@@ -170,6 +180,29 @@ pub fn run(release: bool, browser: Browser) -> Result<()> {
     }
 
     Ok(())
+}
+
+fn locale_folders(crate_dir: &Path) -> String {
+    let Ok(entries) = fs::read_dir(crate_dir.join("static").join("_locales")) else {
+        return String::new();
+    };
+    let mut names: Vec<String> = entries
+        .filter_map(|entry| entry.ok())
+        .map(|entry| {
+            let has_file = entry.path().join("messages.json").is_file();
+            format!("{}{}", entry.file_name().to_string_lossy(), if has_file { "" } else { "?" })
+        })
+        .collect();
+    names.sort();
+    names.join(",")
+}
+
+fn message_keys(crate_dir: &Path, locale: &str) -> Result<Vec<String>> {
+    let file = crate_dir.join("static").join("_locales").join(locale).join("messages.json");
+    let text = fs::read_to_string(&file).with_context(|| format!("failed to read {}", file.display()))?;
+    let messages: serde_json::Map<String, serde_json::Value> = serde_json::from_str(text.trim_start_matches('\u{feff}'))
+        .with_context(|| format!("{} isn't a JSON object", file.display()))?;
+    Ok(messages.keys().cloned().collect())
 }
 
 fn ensure_wasm_target() -> Result<()> {

@@ -126,6 +126,7 @@ Defines extension metadata. Applied to a struct.
     optional_host_permissions = ["https://*/*"], // optional, asked for at runtime
     icons = { 16 = "icons/16.png", 48 = "icons/48.png", 128 = "icons/128.png" }, // optional
     action = { default_title = "My Extension", default_icon = "icons/32.png", shortcut = "Alt+Shift+M" }, // optional
+    default_locale = "en", // optional, needed for translations
     gecko_id = "my-extension@example.com" // optional, Firefox only
 )]
 struct MyExtension;
@@ -139,7 +140,7 @@ struct MyExtension;
 
 Icon paths are relative to `static/` (a leading `/` or `./` is fine). Each must be a PNG file that exists, spelled with the same upper and lower case as on disk, and sizes are whole numbers from 1 to 2048. Anything else is a compile error: Chrome refuses to load an extension with a missing icon, Firefox quietly shows a blank one, and Chrome shows a broken file or an SVG as a blank icon. Changing or deleting an icon rebuilds and re-checks it.
 
-`gecko_id` sets the add-on ID in the Firefox manifest (`browser_specific_settings.gecko.id`). Chromium builds ignore it. If you leave it out, the ID is generated from the extension name, for example `my-extension@oxichrome.dev`.
+`gecko_id` sets the add-on ID in the Firefox manifest (`browser_specific_settings.gecko.id`). Chromium builds ignore it. If you leave it out, the ID is generated from the extension name (its `default_locale` text when the name is a [translated message](#translations)), for example `my-extension@oxichrome.dev`; characters Firefox doesn't allow in an ID become `-`.
 
 It accepts either form [allowed by Firefox](https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/manifest.json/browser_specific_settings#id):
 
@@ -422,6 +423,71 @@ async fn removed(set: PermissionSet) {}
 `contains` is `true` for anything in `permissions` and `false` for a permission this browser doesn't have. `remove` only takes optional ones: removing something from `permissions` or `host_permissions` returns `Err` (Firefox would silently revoke a required site). Grants are kept across restarts, updates and disable/enable in both browsers. Users can also grant or revoke them from the browser's extension settings, which fires the same events.
 
 An on-demand script can rely on optional permissions: put `Scripting` in `optional_permissions` and the sites in `optional_host_permissions`, and ask before running it. Until then, `run` returns `Err` saying what to ask for.
+
+## Translations
+
+Messages live where browsers look for them, in `static/_locales/<locale>/messages.json`, in the [format both browsers use](https://developer.chrome.com/docs/extensions/reference/api/i18n#concepts_and_usage):
+
+```
+static/_locales/
+├── en/messages.json
+├── de/messages.json
+└── pt_BR/messages.json
+```
+
+```json
+{
+  "app_name": { "message": "Tab Tidy" },
+  "closed": { "message": "Closed $1 tabs in $2" },
+  "welcome": {
+    "message": "Welcome back, $name$!",
+    "placeholders": { "name": { "content": "$1", "example": "Ann" } }
+  }
+}
+```
+
+Set `default_locale` to the language every message exists in, and use `t!` anywhere a user sees text:
+
+```rust
+#[oxichrome::extension(
+    name = t!(app_name),
+    description = t!(app_desc),
+    default_locale = "en",
+    version = "1.0.0",
+    action = { default_title = t!(action_title) },
+)]
+struct Extension;
+
+#[oxichrome::menu(title = t!(menu_tidy), contexts = [page])]
+async fn tidy() {}
+
+#[oxichrome::command(description = t!(cmd_tidy), shortcut = "Alt+Shift+T")]
+async fn tidy_now() {}
+
+let text: String = t!(closed, count, window_name);
+let text: String = t!(welcome, name = user.name);
+```
+
+`t!` returns a `String` in the user's language, from any popup, options page, background code or content script. Arguments are anything that implements `Display`, given in order (`$1`, `$2`, ...) or by placeholder name. Browsers pick the language: `de_AT` falls back to `de`, then to `default_locale`, and so does any message a translation leaves out. When the browser's language changes, translated menu titles follow.
+
+Browsers never complain about a mistake in a message: a missing name or a missing argument just shows as empty text. So oxichrome checks it all when it compiles:
+
+- every `t!` name exists (with a "did you mean" for typos), and its argument count or argument names match the message
+- `name`, `description`, `default_title`, menu titles and command descriptions use messages without arguments, since the browser shows those itself
+- every message in another language exists in `default_locale`, with no more arguments and the same placeholder numbers
+- `messages.json` is valid JSON with only `message`, `description` and `placeholders`, names are letters, digits and `_`, no two names differ only in case, and every `$name$` is a declared placeholder that is used
+- arguments run from `$1` up to `$9` without gaps (Chrome shows nothing at all past `$9`; write `$$` for a dollar sign)
+- locale folders are named like `en`, `pt_BR` or `es_419` (not `pt-BR`), each has a `messages.json`, and `_locales` and `default_locale` come together (Chrome refuses to load the extension otherwise)
+
+Editing, adding or removing a locale rebuilds and re-checks it. Writing `"__MSG_name__"` yourself is a compile error that points you to `t!`, so every message gets checked.
+
+```rust
+let language: String = oxichrome::i18n::ui_language();          // "en-US", "de", "pt-BR"
+let preferred: Vec<String> = oxichrome::i18n::accept_languages().await?;
+let detected = oxichrome::i18n::detect_language(&page_text).await?; // .is_reliable, .languages[0].language
+```
+
+`Extension::name()` returns the `default_locale` text of a translated name.
 
 ## Chrome APIs
 

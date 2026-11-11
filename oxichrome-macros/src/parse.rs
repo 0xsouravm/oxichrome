@@ -1,6 +1,8 @@
 use syn::parse::{Parse, ParseStream};
 use syn::{Ident, LitBool, LitInt, LitStr, Token};
 
+pub use crate::i18n::Text;
+
 /// See <https://developer.chrome.com/docs/extensions/develop/concepts/match-patterns>
 /// and <https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/Match_patterns>.
 /// Accepts only patterns both Chrome and Firefox load.
@@ -149,9 +151,10 @@ fn is_gecko_id_guid(val: &str) -> bool {
 
 #[derive(Debug)]
 pub struct ExtensionArgs {
-    pub name: LitStr,
+    pub name: Text,
     pub version: LitStr,
-    pub description: Option<LitStr>,
+    pub description: Option<Text>,
+    pub default_locale: Option<LitStr>,
     pub gecko_id: Option<LitStr>,
     pub permissions: Vec<crate::permission::Declared>,
     pub optional_permissions: Vec<crate::permission::Declared>,
@@ -163,7 +166,7 @@ pub struct ExtensionArgs {
 
 #[derive(Debug)]
 pub struct ActionArgs {
-    pub default_title: Option<LitStr>,
+    pub default_title: Option<Text>,
     pub default_icon: Option<IconSpec>,
     pub shortcut: Option<ShortcutSpec>,
 }
@@ -270,12 +273,12 @@ fn finish_shortcut(
 
 #[derive(Debug)]
 pub struct CommandArgs {
-    pub description: LitStr,
+    pub description: Text,
     pub shortcut: Option<ShortcutSpec>,
 }
 
 pub fn parse_command_args(input: ParseStream) -> syn::Result<CommandArgs> {
-    let mut description: Option<LitStr> = None;
+    let mut description: Option<Text> = None;
     let mut shortcut: Option<ShortcutSpec> = None;
     let mut seen: Vec<String> = Vec::new();
     while !input.is_empty() {
@@ -288,7 +291,7 @@ pub fn parse_command_args(input: ParseStream) -> syn::Result<CommandArgs> {
         input.parse::<Token![=]>()?;
         match name.as_str() {
             "description" => {
-                let text: LitStr = input.parse()?;
+                let text = Text::parse_field(input, "description")?;
                 if text.value().trim().is_empty() {
                     return Err(syn::Error::new(
                         text.span(),
@@ -418,7 +421,7 @@ fn parse_action(input: ParseStream) -> syn::Result<ActionArgs> {
         let key: Ident = content.parse()?;
         content.parse::<Token![=]>()?;
         match key.to_string().as_str() {
-            "default_title" => action.default_title = Some(content.parse()?),
+            "default_title" => action.default_title = Some(Text::parse_field(&content, "default_title")?),
             "default_icon" => {
                 action.default_icon = Some(if content.peek(LitStr) {
                     let path: LitStr = content.parse()?;
@@ -500,9 +503,10 @@ pub fn png_dimensions(bytes: &[u8]) -> Option<(u32, u32)> {
 
 impl Parse for ExtensionArgs {
     fn parse(input: ParseStream) -> syn::Result<Self> {
-        let mut name: Option<LitStr> = None;
+        let mut name: Option<Text> = None;
         let mut version: Option<LitStr> = None;
-        let mut description: Option<LitStr> = None;
+        let mut description: Option<Text> = None;
+        let mut default_locale: Option<LitStr> = None;
         let mut gecko_id: Option<LitStr> = None;
         let mut permissions: Vec<crate::permission::Declared> = Vec::new();
         let mut optional_permissions: Vec<crate::permission::Declared> = Vec::new();
@@ -517,13 +521,16 @@ impl Parse for ExtensionArgs {
 
             match key.to_string().as_str() {
                 "name" => {
-                    name = Some(input.parse()?);
+                    name = Some(Text::parse_field(input, "name")?);
+                }
+                "default_locale" => {
+                    default_locale = Some(input.parse()?);
                 }
                 "version" => {
                     version = Some(input.parse()?);
                 }
                 "description" => {
-                    description = Some(input.parse()?);
+                    description = Some(Text::parse_field(input, "description")?);
                 }
                 "gecko_id" => {
                     let id: LitStr = input.parse()?;
@@ -612,6 +619,7 @@ impl Parse for ExtensionArgs {
             name,
             version,
             description,
+            default_locale,
             gecko_id,
             permissions,
             optional_permissions,
@@ -751,7 +759,7 @@ pub enum MenuKind {
 
 #[derive(Debug)]
 pub struct MenuArgs {
-    pub title: LitStr,
+    pub title: Text,
     pub contexts: Option<Vec<Ident>>,
     pub kind: MenuKind,
     pub parent: Option<syn::Path>,
@@ -778,7 +786,7 @@ fn parse_patterns(input: ParseStream, kind: &str) -> syn::Result<Vec<LitStr>> {
 
 pub fn parse_menu_args(input: ParseStream, submenu: bool) -> syn::Result<MenuArgs> {
     let attr = if submenu { "submenu" } else { "menu" };
-    let mut title: Option<LitStr> = None;
+    let mut title: Option<Text> = None;
     let mut contexts: Option<Vec<Ident>> = None;
     let mut kind = MenuKind::Normal;
     let mut kind_key: Option<Ident> = None;
@@ -798,7 +806,7 @@ pub fn parse_menu_args(input: ParseStream, submenu: bool) -> syn::Result<MenuArg
         seen.push(name.clone());
         input.parse::<Token![=]>()?;
         match name.as_str() {
-            "title" => title = Some(input.parse()?),
+            "title" => title = Some(Text::parse_field(input, "title")?),
             "contexts" => {
                 let content;
                 let brackets = syn::bracketed!(content in input);
@@ -920,7 +928,7 @@ pub fn parse_menu_args(input: ParseStream, submenu: bool) -> syn::Result<MenuArg
         .flatten()
         .map(|context| context.to_string())
         .collect();
-    if title.value().contains("%s") && names != ["selection"] {
+    if title.texts().iter().any(|text| text.contains("%s")) && names != ["selection"] {
         return Err(syn::Error::new(
             title.span(),
             "`%s` is replaced with the selected text only when `contexts = [selection]`; in any other context browsers show `%s` as is",

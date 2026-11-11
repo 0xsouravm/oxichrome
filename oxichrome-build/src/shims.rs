@@ -94,6 +94,15 @@ fn generate_menus(metadata: &ExtensionMetadata) -> String {
     }
     let items = menu_items_json(metadata).to_string();
     let marker = format!("__oxichrome_menus_{:016x}", fnv1a(&items));
+    let localized = metadata
+        .menus
+        .iter()
+        .any(|item| item.title.starts_with("__MSG_") && item.title.ends_with("__"));
+    let marker = if localized {
+        format!("'{marker}_' + chrome.i18n.getUILanguage().replace(/[^A-Za-z0-9]/g, '_')")
+    } else {
+        format!("'{marker}'")
+    };
     let handlers = metadata
         .menus
         .iter()
@@ -103,7 +112,7 @@ fn generate_menus(metadata: &ExtensionMetadata) -> String {
         .join("\n");
     format!(
         r#"const menuItems = {items};
-const menuMarker = '{marker}';
+const menuMarker = {marker};
 const menuHandlers = {{
 {handlers}
 }};
@@ -119,7 +128,9 @@ function menuExists(id) {{
 }}
 
 function createMenu(item) {{
-    const properties = {{ ...item, title: item.title.replaceAll('&', '&&') }};
+    const message = /^__MSG_([A-Za-z0-9_@]+)__$/.exec(item.title);
+    const title = message ? chrome.i18n.getMessage(message[1]) : item.title;
+    const properties = {{ ...item, title: title.replaceAll('&', '&&') }};
     return new Promise((resolve, reject) => {{
         chrome.contextMenus.create(properties, () => {{
             const error = chrome.runtime.lastError;
@@ -466,6 +477,9 @@ mod tests {
             has_options_page: false,
             content_scripts: vec![],
             gecko_id: None,
+            display_name: None,
+            default_locale: None,
+            messages: Vec::new(),
             icons: vec![],
             action: None,
             menus: vec![],
@@ -509,6 +523,9 @@ mod tests {
             has_options_page: false,
             content_scripts: vec![],
             gecko_id: None,
+            display_name: None,
+            default_locale: None,
+            messages: Vec::new(),
             icons: vec![],
             action: None,
             menus: vec![],

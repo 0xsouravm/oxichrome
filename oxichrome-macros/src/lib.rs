@@ -2,6 +2,7 @@ use proc_macro::TokenStream;
 
 mod codegen;
 mod error;
+mod i18n;
 mod metadata;
 mod parse;
 mod permission;
@@ -75,6 +76,17 @@ pub fn options_page(_attr: TokenStream, item: TokenStream) -> TokenStream {
 #[proc_macro_attribute]
 pub fn content_script(attr: TokenStream, item: TokenStream) -> TokenStream {
     codegen::content_script::expand(attr.into(), item.into(), order())
+        .unwrap_or_else(|e| e.into_compile_error())
+        .into()
+}
+
+/// ```ignore
+/// let text: String = oxichrome::t!(greeting, name);
+/// ```
+#[proc_macro]
+pub fn t(input: TokenStream) -> TokenStream {
+    let order = order();
+    i18n::expand_t(input.into(), &format!("{}:{}:{}", order.file, order.line, order.column))
         .unwrap_or_else(|e| e.into_compile_error())
         .into()
 }

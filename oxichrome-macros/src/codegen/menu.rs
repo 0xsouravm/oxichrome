@@ -32,7 +32,9 @@ fn entry(args: &MenuArgs, id: &Ident, item_type: &str, handler: Option<&Ident>, 
         .as_ref()
         .and_then(|path| path.segments.last())
         .map(|segment| segment.ident.to_string());
-    metadata::emit(serde_json::json!({
+    let at = format!("{}:{}:{}", order.file, order.line, order.column);
+    let checks = args.title.checks(&at);
+    let entry = metadata::emit(serde_json::json!({
         "kind": "menu",
         "id": id.to_string(),
         "handler": handler.map(Ident::to_string),
@@ -49,7 +51,8 @@ fn entry(args: &MenuArgs, id: &Ident, item_type: &str, handler: Option<&Ident>, 
         "file": order.file,
         "line": order.line,
         "column": order.column,
-    }))
+    }));
+    quote! { #entry #checks }
 }
 
 fn parent_check(args: &MenuArgs) -> TokenStream {

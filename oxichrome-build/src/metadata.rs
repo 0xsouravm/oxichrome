@@ -7,6 +7,9 @@ pub const SECTION: &str = "oxichrome.v1";
 #[derive(Debug, Default)]
 pub struct ExtensionMetadata {
     pub name: Option<String>,
+    pub display_name: Option<String>,
+    pub default_locale: Option<String>,
+    pub messages: Vec<UsedMessage>,
     pub version: Option<String>,
     pub description: Option<String>,
     pub permissions: Vec<String>,
@@ -28,6 +31,13 @@ pub struct ExtensionMetadata {
 }
 
 pub type Shortcut = BTreeMap<String, String>;
+
+#[derive(Debug, Clone, Deserialize, PartialEq)]
+pub struct UsedMessage {
+    pub key: String,
+    pub args: usize,
+    pub at: String,
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Command {
@@ -128,6 +138,10 @@ impl ContentScript {
 enum Entry {
     Extension {
         name: String,
+        #[serde(default)]
+        display_name: Option<String>,
+        #[serde(default)]
+        default_locale: Option<String>,
         version: String,
         description: Option<String>,
         gecko_id: Option<String>,
@@ -148,6 +162,7 @@ enum Entry {
         fn_name: String,
         export: String,
     },
+    Message(UsedMessage),
     Event {
         fn_name: String,
         export: String,
@@ -285,6 +300,8 @@ pub fn parse_entries(text: &str) -> anyhow::Result<ExtensionMetadata> {
         match entry {
             Entry::Extension {
                 name,
+                display_name,
+                default_locale,
                 version,
                 description,
                 gecko_id,
@@ -303,6 +320,8 @@ pub fn parse_entries(text: &str) -> anyhow::Result<ExtensionMetadata> {
                 metadata.firefox_only = firefox_only;
                 extensions.push(name.clone());
                 metadata.name = Some(name);
+                metadata.display_name = display_name;
+                metadata.default_locale = default_locale;
                 metadata.version = Some(version);
                 metadata.description = description;
                 metadata.gecko_id = gecko_id;
@@ -312,6 +331,11 @@ pub fn parse_entries(text: &str) -> anyhow::Result<ExtensionMetadata> {
                 metadata.action = action;
             }
             Entry::Background { fn_name, export } => backgrounds.push((fn_name, export)),
+            Entry::Message(message) => {
+                if !metadata.messages.contains(&message) {
+                    metadata.messages.push(message);
+                }
+            }
             Entry::Event {
                 fn_name,
                 export,
@@ -399,6 +423,30 @@ pub fn parse_entries(text: &str) -> anyhow::Result<ExtensionMetadata> {
         .content_scripts
         .sort_by(|a, b| (&a.fn_name, &a.export).cmp(&(&b.fn_name, &b.export)));
     Ok(metadata)
+}
+
+pub fn check_messages(metadata: &ExtensionMetadata, default_keys: Option<&[String]>) -> anyhow::Result<()> {
+    let mut used = metadata.messages.clone();
+    used.sort_by(|a, b| (&a.at, &a.key).cmp(&(&b.at, &b.key)));
+    let Some(first) = used.first() else {
+        return Ok(());
+    };
+    let Some(default) = metadata.default_locale.as_deref() else {
+        bail!(
+            "`t!({})` ({}) needs `default_locale = \"en\"` (or the language your messages are in) in #[oxichrome::extension]",
+            first.key,
+            first.at
+        );
+    };
+    let keys = default_keys.unwrap_or_default();
+    if let Some(missing) = used.iter().find(|message| !keys.contains(&message.key)) {
+        bail!(
+            "`t!({})` ({}) isn't in the default locale `{default}`; add it to `static/_locales/{default}/messages.json` (other languages fall back to it, so without it some users would see nothing)",
+            missing.key,
+            missing.at
+        );
+    }
+    Ok(())
 }
 
 fn check_scripts(scripts: &[String], metadata: &ExtensionMetadata) -> anyhow::Result<()> {

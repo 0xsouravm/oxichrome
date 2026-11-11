@@ -52,6 +52,7 @@ pub fn expand(attr: TokenStream, item: TokenStream, order: Order) -> syn::Result
 
     let vis = &func.vis;
     let export = export_name("command", fn_name, &order);
+    let checks = args.description.checks(&format!("{}:{}:{}", order.file, order.line, order.column));
     let entry = metadata::emit(serde_json::json!({
         "kind": "command",
         "name": name,
@@ -88,6 +89,7 @@ pub fn expand(attr: TokenStream, item: TokenStream, order: Order) -> syn::Result
         #func
 
         #entry
+        #checks
 
         #[doc(hidden)]
         #vis mod #fn_name {

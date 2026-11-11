@@ -124,7 +124,7 @@ pub struct Declared {
     pub info: &'static Info,
 }
 
-fn distance(a: &str, b: &str) -> usize {
+pub fn distance(a: &str, b: &str) -> usize {
     let a: Vec<char> = a.to_ascii_lowercase().chars().collect();
     let b: Vec<char> = b.to_ascii_lowercase().chars().collect();
     let mut row: Vec<usize> = (0..=b.len()).collect();
