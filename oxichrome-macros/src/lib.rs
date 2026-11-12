@@ -2,6 +2,7 @@ use proc_macro::TokenStream;
 
 mod codegen;
 mod error;
+mod events;
 mod i18n;
 mod metadata;
 mod parse;

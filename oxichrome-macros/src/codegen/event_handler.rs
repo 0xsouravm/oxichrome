@@ -41,6 +41,12 @@ pub fn expand(attr: TokenStream, item: TokenStream, order: crate::codegen::Order
         ));
     }
 
+    match crate::events::check(&args.namespace.to_string(), &args.event_name.to_string()) {
+        Ok(()) => {}
+        Err(crate::events::Unknown::Namespace(message)) => return Err(syn::Error::new_spanned(&args.namespace, message)),
+        Err(crate::events::Unknown::Event(message)) => return Err(syn::Error::new_spanned(&args.event_name, message)),
+    }
+
     if func.sig.asyncness.is_none() {
         return Err(syn::Error::new_spanned(
             &func.sig.fn_token,
