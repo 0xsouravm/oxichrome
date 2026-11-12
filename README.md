@@ -716,6 +716,15 @@ let node = bookmarks::get(&saved.id).await?;                           // Option
 let top = bookmarks::tree().await?;                                     // also children, subtree, recent
 bookmarks::remove(&saved.id).await?;                                    // remove_tree for a folder with things in it
 
+// History (requires the "history" permission)
+use oxichrome::history::{self, Search};
+history::add("https://www.rust-lang.org/").await?;                       // http, https, ftp, ws, wss and file urls
+let week_ago = js_sys::Date::now() - 7.0 * 24.0 * 3600.0 * 1000.0;
+let items = history::search(&Search::new().text("rust").since(week_ago).limit(20)).await?;  // newest first; also .until(...)
+let visits = history::visits("https://www.rust-lang.org/").await?;      // oldest first, with time, referrer and transition
+history::delete("https://www.rust-lang.org/").await?;
+history::delete_range(week_ago, js_sys::Date::now()).await?;             // both ends included; also delete_all
+
 // Network rules (requires the "declarativeNetRequest" permission)
 use oxichrome::declarative_net_request::{self as dnr, Headers, Redirect, ResourceType, Rule, Transform};
 dnr::update_dynamic_rules(&[], &[Rule::block(1).url_filter("||ads.example^").resource_types([ResourceType::Script, ResourceType::Image])]).await?;
@@ -891,6 +900,22 @@ async fn removed(removed: Removed) {} // id, parent_id, index, title, kind
 ```
 
 Events arrive in the order things happened, including changes made by the user or another extension. Firefox sends only the field that changed, and Chrome sends both; `Changed` always has the current title and url. Changing the title and url together sends two changes in both browsers: the new title with the old url, then both new. Removing a folder sends one `on_removed` for the folder, not one for each thing inside. Listening to a `bookmarks` event without `Bookmarks` in `permissions` is a build error.
+
+A history `Item` has the `url`, `title`, `last_visit` (milliseconds since the epoch) and `visit_count`, the same in both browsers. `search` looks through all of history by default (the browsers' own default is the last 24 hours), returns at most 100 items unless you set `limit`, and puts the newest first. `since` and `until` both include the time you give, in both browsers (Chrome leaves out a visit at exactly the end time). An empty `text` matches everything. `visits` lists a page's visits oldest first, with `referrer` set when the browser knows which visit led there. The `transition` comes from the browser, and the two browsers don't always agree: a page opened by an extension or added with `add` is `Typed` in Chrome and `Link` in Firefox.
+
+Times must be zero or more and finite, and a start after the end is an error (Chrome would quietly return nothing). A `limit` of 0 is an error (Chrome would return everything, Firefox refuses it). `add` takes http, https, ftp, ws, wss and file urls only: Chrome quietly drops `javascript:` and `about:` urls and keeps `data:`, `blob:` and extension urls that Firefox refuses, so oxichrome refuses all of them. `add` records a visit at the current time; neither browser lets an extension set the title or time in both. URLs follow the same rules as bookmarks.
+
+```rust
+use oxichrome::history::{self, Item, Removed};
+
+#[oxichrome::on(history::on_visited)]
+async fn visited(item: Item) {} // the page's title is often still empty here; search later for it
+
+#[oxichrome::on(history::on_visit_removed)]
+async fn removed(removed: Removed) {} // Removed::All, or Removed::Urls(urls) with the pages that were removed
+```
+
+`on_title_changed` exists only in Firefox, so oxichrome leaves it out. Listening to a `history` event without `History` in `permissions` is a build error.
 
 ### Network rules
 

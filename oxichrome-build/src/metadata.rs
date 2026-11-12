@@ -536,6 +536,7 @@ fn check_event_permissions(metadata: &ExtensionMetadata) -> anyhow::Result<()> {
     check_event_permission(metadata, "idle", "idle", "Idle")?;
     check_event_permission(metadata, "web_navigation", "webNavigation", "WebNavigation")?;
     check_event_permission(metadata, "bookmarks", "bookmarks", "Bookmarks")?;
+    check_event_permission(metadata, "history", "history", "History")?;
     Ok(())
 }
 

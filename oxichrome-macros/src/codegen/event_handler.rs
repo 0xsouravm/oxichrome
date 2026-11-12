@@ -34,6 +34,13 @@ pub fn expand(attr: TokenStream, item: TokenStream, order: crate::codegen::Order
         ));
     }
 
+    if args.namespace == "history" && args.event_name == "on_title_changed" {
+        return Err(syn::Error::new_spanned(
+            &args.event_name,
+            "`history::on_title_changed` only exists in Firefox, so oxichrome leaves it out; `on_visited` and `on_visit_removed` work in both browsers",
+        ));
+    }
+
     if func.sig.asyncness.is_none() {
         return Err(syn::Error::new_spanned(
             &func.sig.fn_token,

@@ -1372,3 +1372,75 @@ extern "C" {
     #[wasm_bindgen(js_name = on_bookmarks_moved)]
     pub fn chrome_bookmarks_on_moved_add_listener(callback: &Closure<dyn FnMut(JsValue)>);
 }
+
+#[wasm_bindgen(inline_js = r#"
+let queue = Promise.resolve();
+
+function api() {
+    const history = globalThis.chrome?.history;
+    if (!history) {
+        throw new Error('oxichrome:no-permission');
+    }
+    return history;
+}
+
+function serial(task) {
+    const run = queue.then(task, task);
+    queue = run.catch(() => {});
+    return run;
+}
+
+function inclusive(end) {
+    return typeof globalThis.browser?.runtime?.getBrowserInfo === 'function' ? end : end + 0.0015;
+}
+
+async function search(a) {
+    const query = { text: a.text, startTime: a.startTime, maxResults: a.maxResults };
+    if (a.endTime !== null) {
+        query.endTime = inclusive(a.endTime);
+    }
+    return api().search(query);
+}
+
+async function call(op, a) {
+    switch (op) {
+        case 'search':
+            return search(a);
+        case 'visits':
+            return api().getVisits({ url: a.url });
+        case 'add':
+            return serial(() => api().addUrl({ url: a.url }));
+        case 'delete':
+            return serial(() => api().deleteUrl({ url: a.url }));
+        case 'delete_range':
+            return serial(() => api().deleteRange({ startTime: a.startTime, endTime: inclusive(a.endTime) }));
+        case 'delete_all':
+            return serial(() => api().deleteAll());
+        default:
+            throw new Error(`unknown history call ${op}`);
+    }
+}
+
+export function history_call(op, args) {
+    api();
+    return call(op, JSON.parse(args)).then((value) => JSON.stringify(value ?? null));
+}
+
+export function on_history_visited(callback) {
+    globalThis.chrome?.history?.onVisited.addListener(callback);
+}
+
+export function on_history_visit_removed(callback) {
+    globalThis.chrome?.history?.onVisitRemoved.addListener(callback);
+}
+"#)]
+extern "C" {
+    #[wasm_bindgen(catch)]
+    pub fn history_call(op: &str, args: &str) -> Result<js_sys::Promise, JsValue>;
+
+    #[wasm_bindgen(js_name = on_history_visited)]
+    pub fn chrome_history_on_visited_add_listener(callback: &Closure<dyn FnMut(JsValue)>);
+
+    #[wasm_bindgen(js_name = on_history_visit_removed)]
+    pub fn chrome_history_on_visit_removed_add_listener(callback: &Closure<dyn FnMut(JsValue)>);
+}

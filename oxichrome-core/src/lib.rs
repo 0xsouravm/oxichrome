@@ -9,6 +9,7 @@ pub mod declarative_net_request;
 pub mod downloads;
 pub mod error;
 pub mod event;
+pub mod history;
 pub mod i18n;
 pub mod idle;
 pub mod js_bridge;
