@@ -34,6 +34,15 @@ pub struct ExtensionMetadata {
     pub commands: Vec<Command>,
     pub rule_sets: Vec<RuleSet>,
     pub web_accessible: Vec<String>,
+    pub offscreen: Vec<OffscreenFn>,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+pub struct OffscreenFn {
+    pub name: String,
+    pub export: String,
+    pub reasons: Vec<String>,
+    pub justification: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -228,6 +237,7 @@ enum Entry {
     },
     Menu(MenuEntry),
     Command(CommandEntry),
+    Offscreen(OffscreenFn),
     Script {
         name: String,
         file: String,
@@ -429,6 +439,7 @@ pub fn parse_entries(text: &str) -> anyhow::Result<ExtensionMetadata> {
                 line,
                 column,
             } => scripts.push(format!("`{name}` ({file}:{line}:{column})")),
+            Entry::Offscreen(offscreen) => metadata.offscreen.push(offscreen),
         }
     }
 
@@ -462,6 +473,8 @@ pub fn parse_entries(text: &str) -> anyhow::Result<ExtensionMetadata> {
     }
     scripts.sort();
     check_scripts(&scripts, &metadata)?;
+    metadata.offscreen.sort_by(|a, b| a.export.cmp(&b.export));
+    check_offscreen(&metadata)?;
     metadata.menus = resolve_menus(menus)?;
     let action_shortcut = metadata
         .action
@@ -634,6 +647,19 @@ fn check_scripts(scripts: &[String], metadata: &ExtensionMetadata) -> anyhow::Re
         bail!(
             "{listed} can't reach any page: add the sites to `host_permissions` in #[oxichrome::extension] (like \"https://example.com/*\"), or add `ActiveTab` to `permissions` to run them in the current tab right after a click on the toolbar button, a menu item or a shortcut"
         );
+    }
+    Ok(())
+}
+
+fn check_offscreen(metadata: &ExtensionMetadata) -> anyhow::Result<()> {
+    let has = |name: &str| metadata.permissions.iter().chain(&metadata.optional_permissions).any(|permission| permission == name);
+    for offscreen in &metadata.offscreen {
+        if offscreen.reasons.iter().any(|reason| reason == "CLIPBOARD") && !has("clipboardWrite") && !has("clipboardRead") {
+            bail!(
+                "the offscreen function `{}` gives `Clipboard` as a reason; add `ClipboardWrite` (to copy) or `ClipboardRead` (to paste) to `permissions` in #[oxichrome::extension], since both browsers refuse the clipboard without them",
+                offscreen.name
+            );
+        }
     }
     Ok(())
 }

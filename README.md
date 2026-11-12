@@ -382,6 +382,61 @@ oxichrome::scripting::insert_css(Target::tab(tab_id).all_frames(), "p { color: r
 
 Inserting the same CSS twice adds it once, so one `remove_css` always removes it. Chrome would otherwise stack copies and Firefox wouldn't.
 
+### `#[oxichrome::offscreen(...)]`
+
+Rust that needs a page (the DOM, `DOMParser`, the clipboard, audio) but has no tab to run in. The background can't do these in Chrome, since a service worker has no document. Chrome runs the function in an offscreen document; Firefox has no offscreen documents, so oxichrome runs it in a hidden frame inside the background page. Your code is the same in both.
+
+```rust
+#[oxichrome::extension(name = "Clipper", version = "0.1.0", permissions = [ClipboardWrite, ActiveTab])]
+struct Clipper;
+
+#[oxichrome::offscreen(reasons = [Clipboard], justification = "Copy the page link")]
+async fn copy(text: String) -> bool {
+    let document: web_sys::HtmlDocument = web_sys::window().unwrap().document().unwrap().unchecked_into();
+    let area: web_sys::HtmlTextAreaElement = document.create_element("textarea").unwrap().unchecked_into();
+    area.set_value(&text);
+    document.body().unwrap().append_child(&area).unwrap();
+    area.select();
+    let copied = document.exec_command("copy").unwrap_or(false);
+    area.remove();
+    copied
+}
+
+#[oxichrome::offscreen(reasons = [DomParser], justification = "Read titles of saved pages")]
+async fn title(html: String) -> String {
+    let parser = web_sys::DomParser::new().unwrap();
+    parser.parse_from_string(&html, web_sys::SupportedType::TextHtml).unwrap().title()
+}
+
+#[oxichrome::command(description = "Copy this page's link", shortcut = "Alt+Shift+C")]
+async fn copy_link(press: commands::Press) {
+    let Some(tab_id) = press.tab_id else { return };
+    let Ok(tab) = tabs::get::<serde_json::Value>(tab_id).await else { return };
+    let Some(url) = tab["url"].as_str() else { return };
+    if let Err(err) = copy::OFFSCREEN.run(url.to_string()).await {
+        oxichrome::log!("couldn't copy: {err}");
+    }
+}
+```
+
+| Argument | |
+|---|---|
+| `reasons` | Why Chrome should allow the document: `AudioPlayback`, `BatteryStatus`, `Blobs`, `Clipboard`, `DisplayMedia`, `DomParser`, `DomScraping`, `Geolocation`, `IframeScripting`, `LocalStorage`, `MatchMedia`, `UserMedia`, `WebRtc` or `Workers`. At least one. |
+| `justification` | A few words on why, which Chrome Web Store reviewers read. Required. |
+
+`copy::OFFSCREEN.run(arg)` opens the document if it isn't open, runs the function there and returns its value. It works from the background, the popup, the options page, the side panel and other extension pages. From a content script it returns `Err`, since only the extension may open the document. Like an on-demand script, the function takes at most one argument and returns a copy, so both implement `Serialize` and `Deserialize` and can't borrow, and you can't call `copy(...)` directly.
+
+All offscreen functions share one document, and calls can overlap. The build adds the `offscreen` permission for Chrome and fails when `Clipboard` is a reason without `ClipboardWrite` or `ClipboardRead` in `permissions` (or `optional_permissions`), since both browsers refuse the clipboard without them. In the document, copy and paste with `document.exec_command("copy")` and `"paste"`: `navigator.clipboard` fails in Chrome because the document never has focus.
+
+`oxichrome::offscreen::close()` closes the document (doing nothing when it's closed) and `oxichrome::offscreen::is_open()` says whether it's open. Close it when you're done to free memory; the next `run` opens it again.
+
+Things to know:
+
+- **Only the page and messaging.** In both browsers the function can use the DOM and web APIs, and `runtime` messaging, but no other extension API: `storage`, `tabs` and the rest return an `Err` that says so. Read or write them in the caller and pass values in and out. Calling `close` or `is_open` from inside also returns `Err`.
+- **Don't keep state there.** Chrome may close the document (it closes audio documents after about 30 seconds of silence), and Firefox drops it when the background page goes to sleep. Each `run` works either way, since it reopens the document, but a `thread_local!` counter starts over.
+- **Long audio stops in Firefox** when the background page sleeps, about 30 seconds after the last event.
+- **When the function panics**, `run` returns `Err` with the panic message, the document starts fresh, and the next call works. When the document closes while a call is running, that call returns `Err` too.
+
 ### `#[oxichrome::menu(...)]` and `#[oxichrome::submenu(...)]`
 
 Adds an item to the right-click menu. The async function runs when someone clicks it.
@@ -850,6 +905,7 @@ dist/
 │   ├── popup.html / popup.js
 │   ├── options.html / options.js
 │   ├── sidepanel.html / sidepanel.js
+│   ├── offscreen.html / offscreen.js / offscreen.json   # with #[oxichrome::offscreen]
 │   └── wasm/
 │       ├── crate_name.js
 │       └── crate_name_bg.wasm

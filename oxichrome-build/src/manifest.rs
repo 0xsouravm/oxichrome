@@ -193,6 +193,9 @@ pub fn generate_manifest(metadata: &ExtensionMetadata, browser: Browser) -> anyh
             if metadata.side_panel.is_some() && browser == Browser::Chromium && !permissions.iter().any(|p| p == "sidePanel") {
                 permissions.push("sidePanel".to_string());
             }
+            if !metadata.offscreen.is_empty() && browser == Browser::Chromium && !permissions.iter().any(|p| p == "offscreen") {
+                permissions.push("offscreen".to_string());
+            }
             permissions
         },
         optional_permissions: for_browser(&metadata.optional_permissions, metadata, browser),
@@ -454,6 +457,7 @@ mod tests {
             commands: vec![],
             rule_sets: vec![],
             web_accessible: vec![],
+            offscreen: vec![],
         }
     }
 
@@ -513,6 +517,7 @@ mod tests {
             commands: vec![],
             rule_sets: vec![],
             web_accessible: vec![],
+            offscreen: vec![],
         };
         let json = generate_manifest(&metadata, Browser::Chromium).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
@@ -567,6 +572,7 @@ mod tests {
             commands: vec![],
             rule_sets: vec![],
             web_accessible: vec![],
+            offscreen: vec![],
         };
         let json = generate_manifest(&metadata, Browser::Chromium).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
@@ -612,6 +618,7 @@ mod tests {
             commands: vec![],
             rule_sets: vec![],
             web_accessible: vec![],
+            offscreen: vec![],
             permissions: vec!["storage".to_string()],
             host_permissions: vec![
                 "*://developer.mozilla.org/*".to_string(),

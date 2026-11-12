@@ -109,7 +109,7 @@ pub fn expand(attr: TokenStream, item: TokenStream, order: crate::codegen::Order
     })
 }
 
-fn borrows(ty: &syn::Type) -> bool {
+pub(crate) fn borrows(ty: &syn::Type) -> bool {
     fn scan(tokens: TokenStream) -> bool {
         tokens.into_iter().any(|token| match token {
             proc_macro2::TokenTree::Punct(punct) => punct.as_char() == '&' || punct.as_char() == '\'',

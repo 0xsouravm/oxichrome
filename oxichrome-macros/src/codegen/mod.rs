@@ -7,6 +7,7 @@ pub mod options_page;
 pub mod side_panel;
 pub mod omnibox;
 pub mod content_script;
+pub mod offscreen;
 pub mod menu;
 pub mod command;
 

@@ -939,3 +939,173 @@ extern "C" {
     #[wasm_bindgen(catch)]
     pub fn dnr_read_file(path: &str) -> Result<js_sys::Promise, JsValue>;
 }
+
+#[wasm_bindgen(inline_js = r#"
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+function extensionPage() {
+    const protocol = globalThis.location?.protocol;
+    if (protocol !== 'chrome-extension:' && protocol !== 'moz-extension:') {
+        throw new Error('oxichrome:content-script');
+    }
+    return protocol === 'moz-extension:';
+}
+
+let config = null;
+let creating = null;
+
+function readConfig() {
+    if (!config) {
+        config = fetch(globalThis.chrome.runtime.getURL('offscreen.json')).then(
+            (response) => {
+                if (!response.ok) {
+                    throw new Error('oxichrome:no-offscreen');
+                }
+                return response.json();
+            },
+            () => {
+                throw new Error('oxichrome:no-offscreen');
+            },
+        );
+        config.catch(() => { config = null; });
+    }
+    return config;
+}
+
+async function openChrome() {
+    const offscreen = globalThis.chrome.offscreen;
+    if (!offscreen) {
+        throw new Error('oxichrome:no-offscreen');
+    }
+    if (await offscreen.hasDocument()) {
+        return;
+    }
+    if (!creating) {
+        creating = (async () => {
+            const { reasons, justification } = await readConfig();
+            try {
+                await offscreen.createDocument({ url: 'offscreen.html', reasons, justification });
+            } catch (error) {
+                if (!String(error && error.message).includes('single offscreen document')) {
+                    throw error;
+                }
+            }
+        })().finally(() => { creating = null; });
+    }
+    await creating;
+}
+
+async function host(op) {
+    await readConfig();
+    if (globalThis.__oxichrome_offscreen_host) {
+        return globalThis.__oxichrome_offscreen_host(op);
+    }
+    const reply = await globalThis.chrome.runtime.sendMessage({ __oxichrome_offscreen_host: op });
+    if (!reply || reply.err !== undefined) {
+        throw new Error(reply ? reply.err : 'oxichrome:no-offscreen');
+    }
+    return reply.ok;
+}
+
+async function open(firefox) {
+    if (firefox) {
+        await host('open');
+    } else {
+        await openChrome();
+    }
+}
+
+function inside() {
+    if (globalThis.__oxichrome_offscreen_local) {
+        throw new Error('oxichrome:inside-offscreen');
+    }
+}
+
+async function request(message) {
+    try {
+        return { reply: await globalThis.chrome.runtime.sendMessage(message) };
+    } catch (error) {
+        return { error: String(error && error.message) };
+    }
+}
+
+export async function offscreen_run(name, exportName, arg) {
+    const firefox = extensionPage();
+    if (globalThis.__oxichrome_offscreen_local) {
+        return globalThis.__oxichrome_offscreen_local(exportName, arg);
+    }
+    const id = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    await open(firefox);
+    for (let attempt = 0; ; attempt++) {
+        const started = await request({ __oxichrome_offscreen: exportName, phase: 'start', id, arg });
+        if (started.reply && started.reply.started === id) {
+            break;
+        }
+        if (started.reply && started.reply.err !== undefined) {
+            return started.reply;
+        }
+        if (started.error !== undefined && !started.error.includes('Receiving end does not exist')) {
+            if (/message (channel|port) closed/.test(started.error)) {
+                return { err: "didn't finish: the offscreen document closed while it was running" };
+            }
+            throw new Error(started.error);
+        }
+        if (attempt >= 100) {
+            return { err: "didn't start: the offscreen document never answered" };
+        }
+        await sleep(50);
+        await open(firefox);
+    }
+    const done = await request({ __oxichrome_offscreen: exportName, phase: 'result', id });
+    if (done.reply && (done.reply.ok !== undefined || done.reply.err !== undefined)) {
+        return done.reply;
+    }
+    return { err: "didn't finish: the offscreen document closed while it was running" };
+}
+
+export async function offscreen_close() {
+    inside();
+    if (extensionPage()) {
+        await host('close');
+        return;
+    }
+    const offscreen = globalThis.chrome.offscreen;
+    if (!offscreen) {
+        throw new Error('oxichrome:no-offscreen');
+    }
+    if (creating) {
+        await creating.catch(() => {});
+    }
+    if (await offscreen.hasDocument()) {
+        try {
+            await offscreen.closeDocument();
+        } catch (error) {
+            if (!String(error && error.message).includes('No current offscreen document')) {
+                throw error;
+            }
+        }
+    }
+}
+
+export async function offscreen_is_open() {
+    inside();
+    if (extensionPage()) {
+        return host('is_open');
+    }
+    const offscreen = globalThis.chrome.offscreen;
+    if (!offscreen) {
+        throw new Error('oxichrome:no-offscreen');
+    }
+    return offscreen.hasDocument();
+}
+"#)]
+extern "C" {
+    #[wasm_bindgen(catch)]
+    pub fn offscreen_run(name: &str, export: &str, arg: &str) -> Result<js_sys::Promise, JsValue>;
+
+    #[wasm_bindgen(catch)]
+    pub fn offscreen_close() -> Result<js_sys::Promise, JsValue>;
+
+    #[wasm_bindgen(catch)]
+    pub fn offscreen_is_open() -> Result<js_sys::Promise, JsValue>;
+}

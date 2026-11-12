@@ -1,4 +1,4 @@
-pub use oxichrome_macros::{extension, background, on, popup, options_page, side_panel, omnibox, content_script, menu, submenu, command, t};
+pub use oxichrome_macros::{extension, background, on, popup, options_page, side_panel, omnibox, content_script, offscreen, menu, submenu, command, t};
 
 pub use oxichrome_core as core;
 
@@ -15,6 +15,7 @@ pub use oxichrome_core::i18n;
 pub use oxichrome_core::idle;
 pub use oxichrome_core::downloads;
 pub use oxichrome_core::notifications;
+pub use oxichrome_core::offscreen;
 pub use oxichrome_core::omnibox;
 pub use oxichrome_core::permissions;
 pub use oxichrome_core::permissions::Permission;
@@ -41,7 +42,7 @@ pub mod __private {
 }
 
 pub mod prelude {
-    pub use crate::{extension, background, on, popup, options_page, side_panel, omnibox, content_script, menu, submenu, command, t};
+    pub use crate::{extension, background, on, popup, options_page, side_panel, omnibox, content_script, offscreen, menu, submenu, command, t};
     pub use crate::{OxichromeError, Result};
     pub use crate::core::error;
     pub use crate::action;

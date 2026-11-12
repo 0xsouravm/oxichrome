@@ -157,6 +157,28 @@ pub fn run(release: bool, browser: Browser) -> Result<()> {
         println!("[oxichrome] Generated options.html + options.js");
     }
 
+    for stale in ["offscreen.html", "offscreen.js", "offscreen.json"] {
+        let path = dist_dir.join(stale);
+        if path.exists() {
+            fs::remove_file(&path).with_context(|| format!("failed to remove stale {stale}"))?;
+        }
+    }
+    if !metadata.offscreen.is_empty() {
+        for file in ["offscreen.html", "offscreen.js", "offscreen.json"] {
+            if crate_dir.join("static").join(file).exists() {
+                bail!("`static/{file}` would replace the offscreen document oxichrome makes for your #[oxichrome::offscreen] functions; rename it");
+            }
+        }
+        for (file, text) in [
+            ("offscreen.html", shims::generate_offscreen_html()),
+            ("offscreen.js", shims::generate_offscreen_js(&metadata, &crate_name)),
+            ("offscreen.json", shims::generate_offscreen_json(&metadata)),
+        ] {
+            fs::write(dist_dir.join(file), text).with_context(|| format!("failed to write {file}"))?;
+        }
+        println!("[oxichrome] Generated offscreen.html");
+    }
+
     for cs in &metadata.content_scripts {
         let cs_js = shims::generate_content_script_js(&cs.fn_name, &cs.export, &crate_name);
         let cs_filename = cs.file_name();

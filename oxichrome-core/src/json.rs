@@ -39,6 +39,10 @@ fn to_text<T: Serialize + ?Sized>(value: &T) -> Result<String> {
     Ok(text)
 }
 
+pub(crate) fn check_text(text: &str) -> Result<()> {
+    check_numbers(&serde_json::from_str(text).map_err(serde_error)?)
+}
+
 pub(crate) fn to_js<T: Serialize + ?Sized>(value: &T) -> Result<JsValue> {
     Ok(js_sys::JSON::parse(&to_text(value)?)?)
 }

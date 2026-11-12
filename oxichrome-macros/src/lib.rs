@@ -107,6 +107,19 @@ pub fn content_script(attr: TokenStream, item: TokenStream) -> TokenStream {
 }
 
 /// ```ignore
+/// #[oxichrome::offscreen(reasons = [DomParser], justification = "Read the HTML of saved pages")]
+/// async fn title(html: String) -> String {
+///     // runs in an offscreen document, with a DOM
+/// }
+/// ```
+#[proc_macro_attribute]
+pub fn offscreen(attr: TokenStream, item: TokenStream) -> TokenStream {
+    codegen::offscreen::expand(attr.into(), item.into(), order())
+        .unwrap_or_else(|e| e.into_compile_error())
+        .into()
+}
+
+/// ```ignore
 /// let text: String = oxichrome::t!(greeting, name);
 /// ```
 #[proc_macro]

@@ -13,6 +13,7 @@ pub mod idle;
 pub mod js_bridge;
 mod json;
 pub mod notifications;
+pub mod offscreen;
 pub mod omnibox;
 pub mod permissions;
 pub mod runtime;
