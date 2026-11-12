@@ -32,6 +32,15 @@ pub struct ExtensionMetadata {
     pub action: Option<ActionMetadata>,
     pub menus: Vec<MenuItem>,
     pub commands: Vec<Command>,
+    pub rule_sets: Vec<RuleSet>,
+    pub web_accessible: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+pub struct RuleSet {
+    pub id: String,
+    pub path: String,
+    pub enabled: bool,
 }
 
 pub type Shortcut = BTreeMap<String, String>;
@@ -177,6 +186,10 @@ enum Entry {
         firefox_only: Vec<(String, String)>,
         icons: Vec<(u32, String)>,
         action: Option<ActionMetadata>,
+        #[serde(default)]
+        rule_sets: Vec<RuleSet>,
+        #[serde(default)]
+        web_accessible: Vec<String>,
     },
     Background {
         fn_name: String,
@@ -345,7 +358,11 @@ pub fn parse_entries(text: &str) -> anyhow::Result<ExtensionMetadata> {
                 firefox_only,
                 icons,
                 action,
+                rule_sets,
+                web_accessible,
             } => {
+                metadata.rule_sets = rule_sets;
+                metadata.web_accessible = web_accessible;
                 metadata.optional_permissions = optional_permissions;
                 metadata.optional_host_permissions = optional_host_permissions;
                 metadata.chrome_only = chrome_only;

@@ -162,6 +162,9 @@ pub struct ExtensionArgs {
     pub optional_host_permissions: Vec<LitStr>,
     pub icons: Vec<(u32, LitStr)>,
     pub action: Option<ActionArgs>,
+    pub rule_sets: Vec<(Ident, LitStr)>,
+    pub disabled_rule_sets: Vec<Ident>,
+    pub web_accessible: Vec<LitStr>,
 }
 
 #[derive(Debug)]
@@ -514,6 +517,10 @@ impl Parse for ExtensionArgs {
         let mut optional_host_permissions: Vec<LitStr> = Vec::new();
         let mut icons: Vec<(u32, LitStr)> = Vec::new();
         let mut action: Option<ActionArgs> = None;
+        let mut rule_sets: Vec<(Ident, LitStr)> = Vec::new();
+        let mut disabled_rule_sets: Vec<Ident> = Vec::new();
+        let mut web_accessible: Vec<LitStr> = Vec::new();
+        let mut rule_sets_span: Option<proc_macro2::Span> = None;
 
         while !input.is_empty() {
             let key: Ident = input.parse()?;
@@ -572,6 +579,43 @@ impl Parse for ExtensionArgs {
                 "action" => {
                     action = Some(parse_action(input)?);
                 }
+                "rule_sets" => {
+                    rule_sets_span = Some(key.span());
+                    rule_sets = parse_rule_sets(input)?;
+                }
+                "disabled_rule_sets" => {
+                    let content;
+                    syn::bracketed!(content in input);
+                    while !content.is_empty() {
+                        if content.peek(LitStr) {
+                            let text: LitStr = content.parse()?;
+                            return Err(syn::Error::new(text.span(), format!("name the rule set without quotes, like `disabled_rule_sets = [{}]`", text.value())));
+                        }
+                        let id: Ident = content.parse()?;
+                        if disabled_rule_sets.contains(&id) {
+                            return Err(syn::Error::new(id.span(), format!("`{id}` is listed twice in `disabled_rule_sets`")));
+                        }
+                        disabled_rule_sets.push(id);
+                        if !content.is_empty() {
+                            content.parse::<Token![,]>()?;
+                        }
+                    }
+                }
+                "web_accessible" => {
+                    let content;
+                    syn::bracketed!(content in input);
+                    while !content.is_empty() {
+                        let path: LitStr = content.parse()?;
+                        check_resource_path(&path, "web_accessible")?;
+                        if web_accessible.iter().any(|seen| seen.value() == path.value()) {
+                            return Err(syn::Error::new(path.span(), format!("`{}` is listed twice in `web_accessible`", path.value())));
+                        }
+                        web_accessible.push(path);
+                        if !content.is_empty() {
+                            content.parse::<Token![,]>()?;
+                        }
+                    }
+                }
                 other => {
                     return Err(syn::Error::new(
                         key.span(),
@@ -615,6 +659,25 @@ impl Parse for ExtensionArgs {
             }
         }
 
+        for id in &disabled_rule_sets {
+            if !rule_sets.iter().any(|(known, _)| known == id) {
+                return Err(syn::Error::new(id.span(), format!("`{id}` isn't in `rule_sets`; add it there like `rule_sets = {{ {id} = \"rules/{id}.json\" }}`")));
+            }
+        }
+        if let Some(span) = rule_sets_span {
+            let named = |ident: &str| permissions.iter().any(|declared| declared.info.ident == ident);
+            if !named("DeclarativeNetRequest") && !named("DeclarativeNetRequestWithHostAccess") {
+                return Err(syn::Error::new(span, "rule sets need `DeclarativeNetRequest` in `permissions`"));
+            }
+            if rule_sets.len() > oxichrome_core::declarative_net_request::MAX_RULE_SETS {
+                return Err(syn::Error::new(span, format!("there are {} rule sets; both browsers allow at most {}", rule_sets.len(), oxichrome_core::declarative_net_request::MAX_RULE_SETS)));
+            }
+            let enabled = rule_sets.len() - disabled_rule_sets.len();
+            if enabled > oxichrome_core::declarative_net_request::MAX_ENABLED_RULE_SETS {
+                return Err(syn::Error::new(span, format!("{enabled} rule sets are on at install; Firefox allows at most {}, so list the rest in `disabled_rule_sets`", oxichrome_core::declarative_net_request::MAX_ENABLED_RULE_SETS)));
+            }
+        }
+
         Ok(ExtensionArgs {
             name,
             version,
@@ -627,8 +690,73 @@ impl Parse for ExtensionArgs {
             optional_host_permissions,
             icons,
             action,
+            rule_sets,
+            disabled_rule_sets,
+            web_accessible,
         })
     }
+}
+
+fn parse_rule_sets(input: ParseStream) -> syn::Result<Vec<(Ident, LitStr)>> {
+    let content;
+    let brace = syn::braced!(content in input);
+    let mut sets: Vec<(Ident, LitStr)> = Vec::new();
+    while !content.is_empty() {
+        let id: Ident = content.parse()?;
+        if id.to_string().starts_with('_') {
+            return Err(syn::Error::new(id.span(), format!("rule set names can't start with `_`; the browsers keep those for themselves, so name it `{}`", id.to_string().trim_start_matches('_'))));
+        }
+        if sets.iter().any(|(seen, _)| seen == &id) {
+            return Err(syn::Error::new(id.span(), format!("the rule set `{id}` is listed twice")));
+        }
+        content.parse::<Token![=]>()?;
+        let path: LitStr = content.parse()?;
+        check_resource_path(&path, "rule_sets")?;
+        if path.value().contains('*') {
+            return Err(syn::Error::new(path.span(), "a rule set is one file, so its path can't have `*`"));
+        }
+        if !path.value().ends_with(".json") {
+            return Err(syn::Error::new(path.span(), "a rule set is a JSON file; name it like \"rules/ads.json\""));
+        }
+        if let Some((other, _)) = sets.iter().find(|(_, seen)| seen.value() == path.value()) {
+            return Err(syn::Error::new(path.span(), format!("`{}` is already the file for `{other}`", path.value())));
+        }
+        sets.push((id, path));
+        if !content.is_empty() {
+            content.parse::<Token![,]>()?;
+        }
+    }
+    if sets.is_empty() {
+        return Err(syn::Error::new(brace.span.join(), "`rule_sets` is empty; name each rule set and its file, like `rule_sets = { ads = \"rules/ads.json\" }`"));
+    }
+    Ok(sets)
+}
+
+fn check_resource_path(path: &LitStr, what: &str) -> syn::Result<()> {
+    let value = path.value();
+    let fail = |why: String| Err(syn::Error::new(path.span(), why));
+    if value.is_empty() {
+        return fail(format!("a path in `{what}` can't be empty"));
+    }
+    if value.starts_with('/') {
+        return fail(format!("write `{}` without the leading `/`; paths here are inside `static/`", value.trim_start_matches('/')));
+    }
+    if let Some(inside) = value.strip_prefix("static/") {
+        return fail(format!("write `{inside}`; paths here are already inside `static/`"));
+    }
+    if !value.is_ascii() || value.contains('\\') || value.contains(' ') {
+        return fail(format!("`{value}` must be a plain path with `/`, ASCII letters and no spaces"));
+    }
+    if value.split('/').any(|part| part.is_empty() || part == "." || part == "..") {
+        return fail(format!("`{value}` has an empty, `.` or `..` part"));
+    }
+    if value.matches('*').count() > 1 || (value.contains('*') && !value.ends_with('*') && !value.rsplit('/').next().unwrap_or("").starts_with('*')) {
+        return fail(format!("`{value}` can only have one `*`, as a whole folder (`pages/*`) or a file type (`pages/*.html`)"));
+    }
+    if value == "*" || value.starts_with("wasm/") || value == "wasm" {
+        return fail(format!("`{value}` would expose the extension's own code; list only your pages and files"));
+    }
+    Ok(())
 }
 
 #[derive(Debug)]

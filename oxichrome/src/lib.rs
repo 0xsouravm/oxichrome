@@ -9,6 +9,7 @@ pub use oxichrome_core::alarms;
 pub use oxichrome_core::commands;
 pub use oxichrome_core::context_menus;
 pub use oxichrome_core::cookies;
+pub use oxichrome_core::declarative_net_request;
 pub use oxichrome_core::event;
 pub use oxichrome_core::i18n;
 pub use oxichrome_core::idle;

@@ -184,6 +184,25 @@ pub fn run(release: bool, browser: Browser) -> Result<()> {
             bail!("`static/{style}` is linked as a stylesheet but wasn't copied; add it to `static/`");
         }
     }
+    for set in &metadata.rule_sets {
+        if !static_dir.join(&set.path).is_file() {
+            bail!("rule set `{}` is `static/{}`, which isn't there; add it to `static/`", set.id, set.path);
+        }
+    }
+    for resource in metadata.web_accessible.iter().filter(|resource| !resource.contains('*')) {
+        let generated = match resource.as_str() {
+            "popup.html" => Some(("#[oxichrome::popup]", metadata.has_popup)),
+            "options.html" => Some(("#[oxichrome::options_page]", metadata.has_options_page)),
+            "sidepanel.html" => Some(("#[oxichrome::side_panel]", metadata.side_panel.is_some())),
+            _ => None,
+        };
+        match generated {
+            Some((attribute, false)) => bail!("`{resource}` is web accessible or a redirect target, but there's no {attribute} to make it"),
+            Some(_) => {}
+            None if !static_dir.join(resource).is_file() => bail!("`{resource}` is web accessible or a redirect target, but `static/{resource}` isn't there"),
+            None => {}
+        }
+    }
 
     if command_in_path("wasm-opt") {
         println!("[oxichrome] Running wasm-opt...");

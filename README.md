@@ -127,6 +127,9 @@ Defines extension metadata. Applied to a struct.
     icons = { 16 = "icons/16.png", 48 = "icons/48.png", 128 = "icons/128.png" }, // optional
     action = { default_title = "My Extension", default_icon = "icons/32.png", shortcut = "Alt+Shift+M" }, // optional
     default_locale = "en", // optional, needed for translations
+    rule_sets = { ads = "rules/ads.json", strict = "rules/strict.json" }, // optional, network rules
+    disabled_rule_sets = [strict], // optional, rule sets that start off
+    web_accessible = ["blocked.html", "pages/*"], // optional, files web pages may load
     gecko_id = "my-extension@example.com" // optional, Firefox only
 )]
 struct MyExtension;
@@ -148,6 +151,8 @@ It accepts either form [allowed by Firefox](https://developer.mozilla.org/en-US/
 - GUID in braces: `{daf44bf7-a45e-4450-979c-91cf07434c3d}`
 
 An invalid ID is a compile error, for both Firefox and Chromium builds.
+
+`rule_sets` names the [network rule](#network-rules) files in `static/`, and `disabled_rule_sets` lists the ones that start off. `web_accessible` lists files in `static/` (or `pages/*`, `pages/*.html`) that web pages may load or be redirected to; each must exist, and the extension's own code (`wasm/`) can't be listed.
 
 ### `#[oxichrome::background]`
 
@@ -643,6 +648,20 @@ idle::set_detection_interval(Duration::from_secs(120)).await?;      // when on_s
 use oxichrome::web_navigation::{self, FrameId};
 let main = web_navigation::frame(tab_id, FrameId::MAIN).await?;     // Option<Frame>: None once the tab or frame is gone
 let all = web_navigation::frames(tab_id).await?;                     // Option<Vec<Frame>>, sorted by frame id
+
+// Network rules (requires the "declarativeNetRequest" permission)
+use oxichrome::declarative_net_request::{self as dnr, Headers, Redirect, ResourceType, Rule, Transform};
+dnr::update_dynamic_rules(&[], &[Rule::block(1).url_filter("||ads.example^").resource_types([ResourceType::Script, ResourceType::Image])]).await?;
+dnr::update_dynamic_rules(&[1], &[Rule::block(1).url_filter("||ads.example^").priority(2)]).await?;      // remove and add in one go
+dnr::update_session_rules(&[], &[Rule::modify_headers(2, Headers::new().set_request("x-debug", "1")).tab_ids([tab_id])]).await?;
+Rule::redirect(3, Redirect::transform(Transform::new().remove_param("utm_source"))).url_filter("utm_source=");
+Rule::redirect(4, Redirect::regex_substitution("https://example.org/\\1")).regex("^https://old\\.example/(.*)$");
+Rule::redirect(5, Redirect::extension_path("/blocked.html")).url_filter("||bad.example^").resource_types([ResourceType::MainFrame]);
+let rules: Vec<Rule> = dnr::dynamic_rules().await?;                  // also session_rules, clear_dynamic_rules, clear_session_rules
+dnr::update_rule_sets(&["strict"], &["ads"]).await?;                 // turn rule sets from `rule_sets` on and off
+dnr::disable_static_rules("ads", &[7]).await?;                       // also enable_static_rules, disabled_static_rules
+let on: Vec<String> = dnr::enabled_rule_sets().await?;               // sorted
+
 // Runtime
 let url = oxichrome::runtime::get_url("icon.png");
 oxichrome::runtime::send_message(&msg).await?;
@@ -783,6 +802,25 @@ Every navigation in a frame arrives the same way in both browsers: `on_before_na
 - The `about:blank` Firefox commits in a new window before the real address is dropped.
 
 `NavError` names the common failures (`NameNotResolved`, `ConnectionRefused`, `TimedOut`, `Offline`, `Certificate` and so on) from both browsers' codes; anything else is `Other` with the browser's text. `FrameId::MAIN` is the top frame; Firefox's frame ids for inner frames go past 32 bits, so a `FrameId` holds a `u64`. `is_top_level()` is true for a tab's top frame, which in Chrome includes pages it loads ahead of time. Filter by URL inside the handler: the browsers' own URL filters differ (Firefox refuses some Chrome accepts, and a bad pattern in Firefox silently stops other listeners). Listening to a `web_navigation` event without `WebNavigation` in `permissions` is a build error.
+
+### Network rules
+
+`declarative_net_request` blocks, allows, redirects and changes the headers of requests, with rules both browsers run the same way. A `Rule` starts from its action (`block`, `allow`, `allow_all_requests`, `upgrade_scheme`, `redirect`, `modify_headers`) and its id, and the builder adds the conditions. A rule without `resource_types` matches everything except pages (`main_frame`) in both browsers, so a rule that should stop a page from loading needs `ResourceType::MainFrame`. URL filters ignore case unless you add `case_sensitive()`.
+
+Every rule is checked before it reaches the browser, against the stricter of the two, and a bad one returns `InvalidArgument` naming the rule and the problem. Chrome and Firefox each accept rules the other refuses, so a rule that works in one would fail in the other: domains with capital letters or a port, a regex with lookahead, back references, `(?i)` or more than 1000 repeats (counting repeats inside repeats), a substitution using a group the regex doesn't have, a header name with a space, a value with a line break, and appending to a request header that isn't one of the standard list ones (`accept`, `cookie`, `user-agent` and the like). Resource types only one browser has aren't in `ResourceType`. `tab_ids` only work in session rules.
+
+Adding an id that's already there returns `Err`; pass it in `remove` too to replace it. Dynamic and session rules are limited to 5000 each, and regex rules to 1000 across both, Firefox's limits, which Chrome also accepts; going over returns `LimitExceeded`. Redirect and `modify_headers` rules only act on sites the extension has host permission for, and both browsers silently skip them otherwise, so adding one with no host permissions granted returns `Err`. A redirect to a page of the extension needs the page in `web_accessible` (Firefox shows a blank page otherwise); `update_dynamic_rules` checks it, and pages used by `rule_sets` are added for you.
+
+```json
+[
+  { "id": 1, "action": { "type": "block" }, "condition": { "urlFilter": "||ads.example^", "resourceTypes": ["script", "image"] } },
+  { "id": 2, "action": { "type": "redirect", "redirect": { "extensionPath": "/blocked.html" } }, "condition": { "urlFilter": "||bad.example^", "resourceTypes": ["main_frame"] } }
+]
+```
+
+A rule set file (`static/rules/ads.json` above) is a JSON list in the browsers' own format. Each file is read and checked at compile time with the same rules: a typo in a key, an empty list, a duplicate id, `tabIds`, the old `domains` key, more than 1000 regex rules, or a redirect to a file that isn't in `static/` is a compile error pointing at the file and the rule. So is having more than 100 rule sets, more than 20 on at once (Firefox's limit), more than 30000 rules on at install, a name starting with `_`, rule sets without `DeclarativeNetRequest` in `permissions`, and redirect or header rules without host permissions. Editing a rule file rebuilds and re-checks it.
+
+`update_rule_sets` and `disable_static_rules` only take rule sets and rule ids from your files, and return `Err` for others (the browsers would accept an unknown rule id without a word). At most 20 rule sets can be on at once. `matched_rules` (with `DeclarativeNetRequestFeedback`) and `show_match_count_on_badge` are Chrome only and return `Err` in Firefox.
 
 `chrome.action` needs `action` in the manifest. oxichrome adds it when your extension has a `#[popup]` or an `#[on(action::on_clicked)]` handler. The click event doesn't fire while a popup is set.
 

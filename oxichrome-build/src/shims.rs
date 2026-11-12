@@ -997,6 +997,8 @@ mod tests {
             action: None,
             menus: vec![],
             commands: vec![],
+            rule_sets: vec![],
+            web_accessible: vec![],
         };
 
         let js = generate_background_js(&metadata, "counter-extension");
@@ -1047,6 +1049,8 @@ mod tests {
             action: None,
             menus: vec![],
             commands: vec![],
+            rule_sets: vec![],
+            web_accessible: vec![],
         }
     }
 

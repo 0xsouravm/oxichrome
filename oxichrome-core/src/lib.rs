@@ -4,6 +4,7 @@ pub mod commands;
 pub mod context_menus;
 pub mod content_script;
 pub mod cookies;
+pub mod declarative_net_request;
 pub mod downloads;
 pub mod error;
 pub mod event;

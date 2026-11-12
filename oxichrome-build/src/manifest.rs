@@ -41,6 +41,20 @@ struct Manifest {
     web_accessible_resources: Vec<WebAccessibleResource>,
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     commands: BTreeMap<String, ManifestCommand>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    declarative_net_request: Option<DeclarativeNetRequest>,
+}
+
+#[derive(Serialize)]
+struct DeclarativeNetRequest {
+    rule_resources: Vec<RuleResource>,
+}
+
+#[derive(Serialize)]
+struct RuleResource {
+    id: String,
+    enabled: bool,
+    path: String,
 }
 
 #[derive(Serialize)]
@@ -252,10 +266,26 @@ pub fn generate_manifest(metadata: &ExtensionMetadata, browser: Browser) -> anyh
                 css: cs.css.clone(),
             })
             .collect(),
-        web_accessible_resources: vec![WebAccessibleResource {
-            resources: vec!["wasm/*".to_string()],
-            matches: vec!["<all_urls>".to_string()],
-        }],
+        web_accessible_resources: {
+            let mut resources = vec![WebAccessibleResource {
+                resources: vec!["wasm/*".to_string()],
+                matches: vec!["<all_urls>".to_string()],
+            }];
+            if !metadata.web_accessible.is_empty() {
+                resources.push(WebAccessibleResource {
+                    resources: metadata.web_accessible.clone(),
+                    matches: vec!["<all_urls>".to_string()],
+                });
+            }
+            resources
+        },
+        declarative_net_request: (!metadata.rule_sets.is_empty()).then(|| DeclarativeNetRequest {
+            rule_resources: metadata
+                .rule_sets
+                .iter()
+                .map(|set| RuleResource { id: set.id.clone(), enabled: set.enabled, path: set.path.clone() })
+                .collect(),
+        }),
         commands: {
             let mut commands: BTreeMap<String, ManifestCommand> = metadata
                 .commands
@@ -422,6 +452,8 @@ mod tests {
             action: None,
             menus: vec![],
             commands: vec![],
+            rule_sets: vec![],
+            web_accessible: vec![],
         }
     }
 
@@ -479,6 +511,8 @@ mod tests {
             action: None,
             menus: vec![],
             commands: vec![],
+            rule_sets: vec![],
+            web_accessible: vec![],
         };
         let json = generate_manifest(&metadata, Browser::Chromium).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
@@ -531,6 +565,8 @@ mod tests {
             action: None,
             menus: vec![],
             commands: vec![],
+            rule_sets: vec![],
+            web_accessible: vec![],
         };
         let json = generate_manifest(&metadata, Browser::Chromium).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
@@ -574,6 +610,8 @@ mod tests {
             action: None,
             menus: vec![],
             commands: vec![],
+            rule_sets: vec![],
+            web_accessible: vec![],
             permissions: vec!["storage".to_string()],
             host_permissions: vec![
                 "*://developer.mozilla.org/*".to_string(),
@@ -599,6 +637,27 @@ mod tests {
         assert_eq!(parsed["host_permissions"][0], "*://developer.mozilla.org/*");
         assert_eq!(parsed["host_permissions"][1], "*://*.example.org/*");
         assert_eq!(parsed["permissions"][0], "storage");
+    }
+
+    #[test]
+    fn rule_sets_and_web_accessible_files_reach_both_manifests() {
+        let text = r#"{"kind":"extension","name":"R","version":"1.0.0","description":null,"gecko_id":"r@x.y","permissions":["declarativeNetRequest"],"host_permissions":[],"icons":[],"action":null,"rule_sets":[{"id":"ads","path":"rules/ads.json","enabled":true},{"id":"beta","path":"rules/beta.json","enabled":false}],"web_accessible":["blocked.html","pages/*"]}"#;
+        let metadata = crate::metadata::parse_entries(text).unwrap();
+        for browser in [Browser::Chromium, Browser::Firefox] {
+            let parsed: serde_json::Value = serde_json::from_str(&generate_manifest(&metadata, browser).unwrap()).unwrap();
+            assert_eq!(
+                parsed["declarative_net_request"],
+                serde_json::json!({"rule_resources": [{"id": "ads", "enabled": true, "path": "rules/ads.json"}, {"id": "beta", "enabled": false, "path": "rules/beta.json"}]})
+            );
+            assert_eq!(
+                parsed["web_accessible_resources"],
+                serde_json::json!([{"resources": ["wasm/*"], "matches": ["<all_urls>"]}, {"resources": ["blocked.html", "pages/*"], "matches": ["<all_urls>"]}])
+            );
+        }
+        let plain = crate::metadata::parse_entries(r#"{"kind":"extension","name":"P","version":"1.0.0","description":null,"gecko_id":null,"permissions":[],"host_permissions":[],"icons":[],"action":null}"#).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&generate_manifest(&plain, Browser::Chromium).unwrap()).unwrap();
+        assert!(parsed.get("declarative_net_request").is_none());
+        assert_eq!(parsed["web_accessible_resources"].as_array().unwrap().len(), 1);
     }
 
     #[test]

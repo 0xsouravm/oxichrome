@@ -891,3 +891,51 @@ extern "C" {
     #[wasm_bindgen(js_name = on_downloads_erased)]
     pub fn chrome_downloads_on_erased_add_listener(callback: &Closure<dyn FnMut(JsValue)>);
 }
+
+#[wasm_bindgen(inline_js = r#"
+function dnr() {
+    const api = globalThis.chrome?.declarativeNetRequest;
+    if (!api) {
+        throw new Error('oxichrome:no-permission');
+    }
+    return api;
+}
+
+export function dnr_call(method, arg) {
+    const api = dnr();
+    if (typeof api[method] !== 'function') {
+        throw new Error('oxichrome:chrome-only');
+    }
+    return Promise.resolve(arg === undefined ? api[method]() : api[method](arg));
+}
+
+export function dnr_manifest() {
+    return globalThis.chrome.runtime.getManifest();
+}
+
+export function dnr_has_host_access() {
+    return globalThis.chrome.permissions.getAll().then((all) => (all.origins || []).length > 0);
+}
+
+export function dnr_read_file(path) {
+    return fetch(globalThis.chrome.runtime.getURL(path)).then((response) => {
+        if (!response.ok) {
+            throw new Error(`can't read ${path}`);
+        }
+        return response.text();
+    });
+}
+"#)]
+extern "C" {
+    #[wasm_bindgen(catch)]
+    pub fn dnr_call(method: &str, arg: &JsValue) -> Result<js_sys::Promise, JsValue>;
+
+    #[wasm_bindgen(catch)]
+    pub fn dnr_manifest() -> Result<JsValue, JsValue>;
+
+    #[wasm_bindgen(catch)]
+    pub fn dnr_has_host_access() -> Result<js_sys::Promise, JsValue>;
+
+    #[wasm_bindgen(catch)]
+    pub fn dnr_read_file(path: &str) -> Result<js_sys::Promise, JsValue>;
+}

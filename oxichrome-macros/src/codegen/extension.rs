@@ -60,6 +60,103 @@ fn check_icon(path: &LitStr) -> syn::Result<TokenStream> {
     })
 }
 
+const GENERATED_PAGES: &[&str] = &["popup.html", "options.html", "sidepanel.html"];
+
+fn static_root(span: proc_macro2::Span) -> syn::Result<PathBuf> {
+    std::env::var_os("CARGO_MANIFEST_DIR")
+        .map(|dir| PathBuf::from(dir).join("static"))
+        .ok_or_else(|| syn::Error::new(span, "CARGO_MANIFEST_DIR is not set"))
+}
+
+fn track(relative: &str) -> TokenStream {
+    let include = format!("/static/{relative}");
+    quote! {
+        #[doc(hidden)]
+        const _: &[u8] = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), #include));
+    }
+}
+
+fn check_resource(relative: &str, span: proc_macro2::Span) -> syn::Result<TokenStream> {
+    if GENERATED_PAGES.contains(&relative) {
+        return Ok(TokenStream::new());
+    }
+    let root = static_root(span)?;
+    if relative.contains('*') {
+        if let Some((folder, _)) = relative.rsplit_once('/') {
+            let found = find_exact(&root, folder).map_err(|reason| syn::Error::new(span, reason))?;
+            if !found.is_dir() {
+                return Err(syn::Error::new(span, format!("`static/{folder}` isn't a folder")));
+            }
+        }
+        return Ok(TokenStream::new());
+    }
+    let file = find_exact(&root, relative).map_err(|reason| syn::Error::new(span, reason))?;
+    if !file.is_file() {
+        return Err(syn::Error::new(span, format!("`static/{relative}` is a folder; name a file, or `{relative}/*` for everything in it")));
+    }
+    Ok(track(relative))
+}
+
+struct RuleSets {
+    checks: TokenStream,
+    entries: Vec<serde_json::Value>,
+    extension_paths: Vec<String>,
+}
+
+fn check_rule_sets(args: &ExtensionArgs) -> syn::Result<RuleSets> {
+    use oxichrome_core::declarative_net_request as dnr;
+    let mut checks = TokenStream::new();
+    let mut entries = Vec::new();
+    let mut extension_paths: Vec<String> = Vec::new();
+    let mut enabled_rules = 0;
+    let mut needs_host_access: Option<&LitStr> = None;
+    for (id, path) in &args.rule_sets {
+        let relative = path.value();
+        let root = static_root(path.span())?;
+        let file = find_exact(&root, &relative).map_err(|reason| syn::Error::new(path.span(), format!("rule set `{id}`: {reason}")))?;
+        let text = std::fs::read_to_string(&file).map_err(|err| syn::Error::new(path.span(), format!("rule set `{id}`: `static/{relative}` can't be read: {err}")))?;
+        let summary = dnr::check_static_rule_set(&text).map_err(|why| syn::Error::new(path.span(), format!("rule set `{id}` in `static/{relative}`: {why}")))?;
+        let enabled = !args.disabled_rule_sets.contains(id);
+        if enabled {
+            enabled_rules += summary.rules;
+        }
+        if summary.needs_host_access && needs_host_access.is_none() {
+            needs_host_access = Some(path);
+        }
+        for target in &summary.extension_paths {
+            let inside = target.trim_start_matches('/').to_string();
+            check_resource(&inside, path.span()).map_err(|err| syn::Error::new(path.span(), format!("rule set `{id}` redirects to `{target}`, but {err}")))?;
+            if !extension_paths.contains(&inside) {
+                extension_paths.push(inside);
+            }
+        }
+        checks.extend(track(&relative));
+        entries.push(serde_json::json!({ "id": id.to_string(), "path": relative, "enabled": enabled }));
+    }
+    if enabled_rules > dnr::GUARANTEED_STATIC_RULES {
+        let span = args.rule_sets[0].1.span();
+        return Err(syn::Error::new(span, format!(
+            "the rule sets on at install have {enabled_rules} rules; both browsers only promise {} for one extension, so turn some off with `disabled_rule_sets`",
+            dnr::GUARANTEED_STATIC_RULES
+        )));
+    }
+    let has_hosts = !args.host_permissions.is_empty() || !args.optional_host_permissions.is_empty();
+    if let Some(path) = needs_host_access {
+        if !has_hosts {
+            return Err(syn::Error::new(path.span(), format!(
+                "`static/{}` has redirect or modifyHeaders rules, which only work on sites the extension has host permission for; add them to `host_permissions`",
+                path.value()
+            )));
+        }
+    }
+    let only_with_host_access = args.permissions.iter().any(|declared| declared.info.ident == "DeclarativeNetRequestWithHostAccess")
+        && !args.permissions.iter().any(|declared| declared.info.ident == "DeclarativeNetRequest");
+    if only_with_host_access && !has_hosts && !args.rule_sets.is_empty() {
+        return Err(syn::Error::new(args.rule_sets[0].1.span(), "`DeclarativeNetRequestWithHostAccess` only acts on sites in `host_permissions`, and there are none; add sites there, or use `DeclarativeNetRequest`"));
+    }
+    Ok(RuleSets { checks, entries, extension_paths })
+}
+
 fn check_locales(args: &ExtensionArgs) -> syn::Result<(TokenStream, String)> {
     let locales = crate::i18n::load().map_err(|err| {
         syn::Error::new(args.default_locale.as_ref().map(LitStr::span).unwrap_or_else(proc_macro2::Span::call_site), err)
@@ -141,6 +238,18 @@ pub fn expand(attr: TokenStream, item: TokenStream) -> Result<TokenStream, syn::
         .into_iter()
         .map(check_icon)
         .collect::<syn::Result<Vec<_>>>()?;
+    let rule_sets = check_rule_sets(&args)?;
+    let mut web_accessible: Vec<String> = Vec::new();
+    let mut resource_checks = rule_sets.checks;
+    for path in &args.web_accessible {
+        resource_checks.extend(check_resource(&path.value(), path.span())?);
+        web_accessible.push(path.value());
+    }
+    for path in rule_sets.extension_paths {
+        if !web_accessible.contains(&path) {
+            web_accessible.push(path);
+        }
+    }
 
     let sizes = |sizes: &[(u32, LitStr)]| -> syn::Result<serde_json::Value> {
         sizes
@@ -177,6 +286,8 @@ pub fn expand(attr: TokenStream, item: TokenStream) -> Result<TokenStream, syn::
         "firefox_only": only(|info| info.chrome),
         "icons": sizes(&args.icons)?,
         "action": action,
+        "rule_sets": rule_sets.entries,
+        "web_accessible": web_accessible,
     }));
 
     Ok(quote! {
@@ -185,6 +296,7 @@ pub fn expand(attr: TokenStream, item: TokenStream) -> Result<TokenStream, syn::
         #entry
 
         #(#icon_checks)*
+        #resource_checks
         #(#permission_checks)*
         #locale_checks
 
