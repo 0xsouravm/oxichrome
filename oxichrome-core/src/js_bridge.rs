@@ -1109,3 +1109,266 @@ extern "C" {
     #[wasm_bindgen(catch)]
     pub fn offscreen_is_open() -> Result<js_sys::Promise, JsValue>;
 }
+
+#[wasm_bindgen(inline_js = r#"
+const FIREFOX_ROOT = 'root________';
+const FIREFOX_TAGS = 'tags________';
+let queue = Promise.resolve();
+
+function api() {
+    const bookmarks = globalThis.chrome?.bookmarks;
+    if (!bookmarks) {
+        throw new Error('oxichrome:no-permission');
+    }
+    return bookmarks;
+}
+
+function firefox() {
+    return typeof globalThis.browser?.runtime?.getBrowserInfo === 'function';
+}
+
+function rootId() {
+    return firefox() ? FIREFOX_ROOT : '0';
+}
+
+function fail(code, detail) {
+    throw new Error(`oxichrome:${code}:${detail}`);
+}
+
+function isFolder(node) {
+    return node.type === 'folder' || (node.type === undefined && node.url === undefined);
+}
+
+async function tagFolders() {
+    if (!firefox()) {
+        return new Set();
+    }
+    try {
+        return new Set((await api().getChildren(FIREFOX_TAGS)).map((node) => node.id));
+    } catch (error) {
+        return new Set();
+    }
+}
+
+async function raw(id) {
+    if (id === rootId() || id === FIREFOX_TAGS) {
+        fail('not-found', id);
+    }
+    let node;
+    try {
+        [node] = await api().get(id);
+    } catch (error) {
+        fail('not-found', id);
+    }
+    if (!node || (firefox() && (node.parentId === FIREFOX_TAGS || (await tagFolders()).has(node.parentId)))) {
+        fail('not-found', id);
+    }
+    return node;
+}
+
+async function visible(nodes) {
+    const tags = await tagFolders();
+    return nodes.filter((node) => node.id !== rootId() && node.id !== FIREFOX_TAGS && node.parentId !== FIREFOX_TAGS && !tags.has(node.parentId));
+}
+
+async function folder(id) {
+    if (id === rootId()) {
+        fail('root', id);
+    }
+    const node = await raw(id);
+    if (!isFolder(node)) {
+        fail('not-folder', id);
+    }
+    return node;
+}
+
+function changeable(node) {
+    if (node.parentId === rootId()) {
+        fail('top-level', node.id);
+    }
+    if (node.unmodifiable === 'managed') {
+        fail('managed', node.id);
+    }
+}
+
+function writable(parent) {
+    if (parent.unmodifiable === 'managed') {
+        fail('managed', parent.id);
+    }
+}
+
+async function count(id) {
+    return (await api().getChildren(id)).length;
+}
+
+function serial(task) {
+    const run = queue.then(task, task);
+    queue = run.catch(() => {});
+    return run;
+}
+
+async function top() {
+    const [root] = await api().getTree();
+    return (root.children || []).filter((child) => child.id !== FIREFOX_TAGS);
+}
+
+async function create(details) {
+    const parent = await folder(details.parentId);
+    writable(parent);
+    const length = await count(parent.id);
+    if (details.index !== null && details.index > length) {
+        fail('index', `${details.index}:${length}`);
+    }
+    const create = { parentId: parent.id, title: details.title };
+    if (details.url !== null) {
+        create.url = details.url;
+    }
+    if (details.index !== null) {
+        create.index = details.index;
+    }
+    return api().create(create);
+}
+
+async function update(id, change) {
+    const node = await raw(id);
+    changeable(node);
+    if (node.type === 'separator') {
+        fail('separator', id);
+    }
+    if (change.url !== null && isFolder(node)) {
+        fail('folder-url', id);
+    }
+    const update = {};
+    if (change.title !== null && change.title !== (node.title ?? '')) {
+        update.title = change.title;
+    }
+    if (change.url !== null && change.url !== node.url) {
+        update.url = change.url;
+    }
+    if (Object.keys(update).length === 0) {
+        return node;
+    }
+    return api().update(id, update);
+}
+
+async function move(id, parentId, index) {
+    const node = await raw(id);
+    changeable(node);
+    const parent = await folder(parentId);
+    writable(parent);
+    for (let step = parent; step; ) {
+        if (step.id === node.id) {
+            fail('into-self', id);
+        }
+        if (!step.parentId || step.parentId === rootId()) {
+            break;
+        }
+        [step] = await api().get(step.parentId);
+    }
+    const length = await count(parent.id);
+    const same = node.parentId === parent.id;
+    const last = same ? length - 1 : length;
+    if (index !== null && index > last) {
+        fail('index', `${index}:${last}`);
+    }
+    const target = index === null ? last : index;
+    if (same && target === node.index) {
+        return node;
+    }
+    const destination = { parentId: parent.id, index: !firefox() && same && target > node.index ? target + 1 : target };
+    return api().move(id, destination);
+}
+
+async function remove(id, tree) {
+    const node = await raw(id);
+    changeable(node);
+    if (isFolder(node)) {
+        if (!tree && (await count(id)) > 0) {
+            fail('not-empty', id);
+        }
+        await (tree ? api().removeTree(id) : api().remove(id));
+    } else {
+        await api().remove(id);
+    }
+    return null;
+}
+
+async function search(query) {
+    const ask = {};
+    for (const key of ['query', 'url', 'title']) {
+        if (query[key] !== null && query[key] !== '') {
+            ask[key] = query[key];
+        }
+    }
+    const found = await visible(await api().search(ask));
+    return query.title === null ? found : found.filter((node) => (node.title ?? '') === query.title);
+}
+
+async function call(op, a) {
+    switch (op) {
+        case 'top':
+            return top();
+        case 'get':
+            return raw(a.id);
+        case 'children':
+            await folder(a.id);
+            return visible(await api().getChildren(a.id));
+        case 'subtree':
+            await raw(a.id);
+            return (await api().getSubTree(a.id))[0];
+        case 'recent':
+            return visible(await api().getRecent(a.count));
+        case 'search':
+            return search(a);
+        case 'create':
+            return serial(() => create(a));
+        case 'update':
+            return serial(() => update(a.id, a.change));
+        case 'move':
+            return serial(() => move(a.id, a.parentId, a.index));
+        case 'remove':
+            return serial(() => remove(a.id, false));
+        case 'remove_tree':
+            return serial(() => remove(a.id, true));
+        default:
+            throw new Error(`unknown bookmarks call ${op}`);
+    }
+}
+
+export function bookmarks_call(op, args) {
+    api();
+    return call(op, JSON.parse(args)).then((value) => JSON.stringify(value ?? null));
+}
+
+export function on_bookmarks_created(callback) {
+    globalThis.chrome?.bookmarks?.onCreated.addListener(callback);
+}
+
+export function on_bookmarks_removed(callback) {
+    globalThis.chrome?.bookmarks?.onRemoved.addListener(callback);
+}
+
+export function on_bookmarks_changed(callback) {
+    globalThis.chrome?.bookmarks?.onChanged.addListener(callback);
+}
+
+export function on_bookmarks_moved(callback) {
+    globalThis.chrome?.bookmarks?.onMoved.addListener(callback);
+}
+"#)]
+extern "C" {
+    #[wasm_bindgen(catch)]
+    pub fn bookmarks_call(op: &str, args: &str) -> Result<js_sys::Promise, JsValue>;
+
+    #[wasm_bindgen(js_name = on_bookmarks_created)]
+    pub fn chrome_bookmarks_on_created_add_listener(callback: &Closure<dyn FnMut(JsValue)>);
+
+    #[wasm_bindgen(js_name = on_bookmarks_removed)]
+    pub fn chrome_bookmarks_on_removed_add_listener(callback: &Closure<dyn FnMut(JsValue)>);
+
+    #[wasm_bindgen(js_name = on_bookmarks_changed)]
+    pub fn chrome_bookmarks_on_changed_add_listener(callback: &Closure<dyn FnMut(JsValue)>);
+
+    #[wasm_bindgen(js_name = on_bookmarks_moved)]
+    pub fn chrome_bookmarks_on_moved_add_listener(callback: &Closure<dyn FnMut(JsValue)>);
+}

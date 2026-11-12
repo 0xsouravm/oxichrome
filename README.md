@@ -704,6 +704,18 @@ use oxichrome::web_navigation::{self, FrameId};
 let main = web_navigation::frame(tab_id, FrameId::MAIN).await?;     // Option<Frame>: None once the tab or frame is gone
 let all = web_navigation::frames(tab_id).await?;                     // Option<Vec<Frame>>, sorted by frame id
 
+// Bookmarks (requires the "bookmarks" permission)
+use oxichrome::bookmarks::{self, Change, New, Search, Special};
+let other = bookmarks::folder(Special::Other).await?;                    // also Toolbar, Menu and Mobile (Firefox), Managed
+let folder = bookmarks::create(&New::folder(&other.id, "Reading")).await?;
+let saved = bookmarks::create(&New::bookmark(&folder.id, "Rust", "https://www.rust-lang.org/").index(0)).await?;
+bookmarks::update(&saved.id, &Change::new().title("Rust home")).await?;
+bookmarks::move_to(&saved.id, &other.id, Some(0)).await?;              // None puts it at the end
+let found = bookmarks::search(&Search::new().text("rust")).await?;      // also .url(...) and .title(...)
+let node = bookmarks::get(&saved.id).await?;                           // Option<Node>
+let top = bookmarks::tree().await?;                                     // also children, subtree, recent
+bookmarks::remove(&saved.id).await?;                                    // remove_tree for a folder with things in it
+
 // Network rules (requires the "declarativeNetRequest" permission)
 use oxichrome::declarative_net_request::{self as dnr, Headers, Redirect, ResourceType, Rule, Transform};
 dnr::update_dynamic_rules(&[], &[Rule::block(1).url_filter("||ads.example^").resource_types([ResourceType::Script, ResourceType::Image])]).await?;
@@ -857,6 +869,28 @@ Every navigation in a frame arrives the same way in both browsers: `on_before_na
 - The `about:blank` Firefox commits in a new window before the real address is dropped.
 
 `NavError` names the common failures (`NameNotResolved`, `ConnectionRefused`, `TimedOut`, `Offline`, `Certificate` and so on) from both browsers' codes; anything else is `Other` with the browser's text. `FrameId::MAIN` is the top frame; Firefox's frame ids for inner frames go past 32 bits, so a `FrameId` holds a `u64`. `is_top_level()` is true for a tab's top frame, which in Chrome includes pages it loads ahead of time. Filter by URL inside the handler: the browsers' own URL filters differ (Firefox refuses some Chrome accepts, and a bad pattern in Firefox silently stops other listeners). Listening to a `web_navigation` event without `WebNavigation` in `permissions` is a build error.
+
+A bookmark `Node` reads the same in both browsers: `id`, `parent_id` (`None` for the browser's top-level folders), `index`, `title`, `kind` (`Bookmark { url }`, `Folder` or `Separator`), `date_added` in milliseconds, `special` for the top-level folders and `managed` for folders an administrator controls. `children` is filled by `tree` and `subtree` only; the other calls leave it `None`. Chrome has a toolbar, other bookmarks and, once synced, mobile bookmarks. Firefox also has a bookmarks menu. `folder(Special::...)` returns `InvalidArgument` when the browser has no such folder. Separators come from Firefox only; Chrome can't create them.
+
+Firefox lets an extension do things Chrome refuses, so oxichrome refuses them in both browsers, with a reason. That covers putting a bookmark inside another bookmark, using an index past the end of a folder (Firefox would quietly put it last), and renaming, moving or removing a top-level folder. `remove` refuses a folder that isn't empty; use `remove_tree`. Moving to an `index` means the final position, the same in both browsers (Chrome counts it before taking the bookmark out). Firefox's tags are kept out of every result and event. Titles turn line breaks and tabs into spaces, like Chrome does, and keep at most 4096 characters. A URL needs a scheme, at most 65536 bytes, and no spaces or control characters; encode them (`%20`). Writes from one page run one at a time, so creating several bookmarks at once keeps their order in Firefox too. `search` text matches words in titles and URLs. `url(...)` matches the whole URL, and `title(...)` matches the whole title exactly.
+
+```rust
+use oxichrome::bookmarks::{self, Changed, Moved, Node, Removed};
+
+#[oxichrome::on(bookmarks::on_created)]
+async fn created(node: Node) {}
+
+#[oxichrome::on(bookmarks::on_changed)]
+async fn changed(change: Changed) {} // id, title and url as they are after the change
+
+#[oxichrome::on(bookmarks::on_moved)]
+async fn moved(moved: Moved) {} // id, parent_id, index, old_parent_id, old_index
+
+#[oxichrome::on(bookmarks::on_removed)]
+async fn removed(removed: Removed) {} // id, parent_id, index, title, kind
+```
+
+Events arrive in the order things happened, including changes made by the user or another extension. Firefox sends only the field that changed, and Chrome sends both; `Changed` always has the current title and url. Changing the title and url together sends two changes in both browsers: the new title with the old url, then both new. Removing a folder sends one `on_removed` for the folder, not one for each thing inside. Listening to a `bookmarks` event without `Bookmarks` in `permissions` is a build error.
 
 ### Network rules
 

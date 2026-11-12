@@ -24,6 +24,16 @@ pub fn expand(attr: TokenStream, item: TokenStream, order: crate::codegen::Order
         ));
     }
 
+    if args.namespace == "bookmarks" && ["on_children_reordered", "on_import_began", "on_import_ended"].iter().any(|name| args.event_name == name) {
+        return Err(syn::Error::new_spanned(
+            &args.event_name,
+            format!(
+                "`bookmarks::{}` only exists in Chrome, so oxichrome leaves it out; `on_created`, `on_changed`, `on_moved` and `on_removed` work in both browsers",
+                args.event_name
+            ),
+        ));
+    }
+
     if func.sig.asyncness.is_none() {
         return Err(syn::Error::new_spanned(
             &func.sig.fn_token,

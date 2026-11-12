@@ -314,6 +314,15 @@ fn generate_listeners(metadata: &ExtensionMetadata) -> String {
     if !navigation.is_empty() {
         add("webNavigation", generate_web_navigation(&navigation));
     }
+    let bookmarks: Vec<(String, Vec<String>)> = events
+        .iter()
+        .filter(|(event, _)| event.starts_with("chrome.bookmarks."))
+        .cloned()
+        .collect();
+    events.retain(|(event, _)| !event.starts_with("chrome.bookmarks."));
+    if !bookmarks.is_empty() {
+        add("bookmarks", generate_bookmarks(&bookmarks));
+    }
     if events
         .iter()
         .any(|(event, _)| event.starts_with("chrome.notifications."))
@@ -747,6 +756,143 @@ function wnEmit(kind, details) {{
         js.push_str(WEB_NAVIGATION_LIFECYCLE);
     }
     js.push_str(&passthrough);
+    js
+}
+
+const BOOKMARK_EVENTS: &[(&str, &str)] = &[("onCreated", "created"), ("onRemoved", "removed"), ("onChanged", "changed"), ("onMoved", "moved")];
+
+const BOOKMARK_HELPERS: &str = r#"const bmFirefox = typeof globalThis.browser?.runtime?.getBrowserInfo === 'function';
+const bmTagFolders = new Set();
+const bmState = new Map();
+const bmEmitted = new Map();
+let bmQueue = Promise.resolve();
+
+function bmEmit(kind, value) {
+    const handlers = bmHandlers[kind];
+    if (handlers) {
+        dispatch(() => handlers.forEach((handler) => handler(value)));
+    }
+}
+
+function bmInOrder(task) {
+    bmQueue = bmQueue.then(task).catch((error) => console.error('[oxichrome] Bookmarks:', error));
+}
+
+function bmRemember(node) {
+    bmState.set(node.id, { id: node.id, parentId: node.parentId, title: node.title ?? '', url: node.url, type: node.type });
+}
+
+async function bmTagged(...ids) {
+    if (!bmFirefox) {
+        return false;
+    }
+    const hit = () => ids.some((id) => id === 'tags________' || bmTagFolders.has(id));
+    if (hit()) {
+        return true;
+    }
+    try {
+        (await chrome.bookmarks.getChildren('tags________')).forEach((node) => bmTagFolders.add(node.id));
+    } catch (error) {}
+    return hit();
+}
+
+"#;
+
+const BOOKMARK_LISTENERS: &[(&str, &str)] = &[
+    (
+        "created",
+        r#"chrome.bookmarks.onCreated.addListener((id, node) => bmInOrder(async () => {
+    if (node.parentId === 'tags________') {
+        bmTagFolders.add(id);
+    }
+    bmRemember(node);
+    if (!(await bmTagged(node.parentId))) {
+        bmEmit('created', node);
+    }
+}));
+"#,
+    ),
+    (
+        "removed",
+        r#"chrome.bookmarks.onRemoved.addListener((id, info) => bmInOrder(async () => {
+    bmState.delete(id);
+    bmEmitted.delete(id);
+    if (!(await bmTagged(info.parentId))) {
+        const node = info.node ?? {};
+        bmEmit('removed', { id, parentId: info.parentId, index: info.index, title: node.title ?? '', url: node.url, type: node.type });
+    }
+}));
+"#,
+    ),
+    (
+        "changed",
+        r#"chrome.bookmarks.onChanged.addListener((id, info) => bmInOrder(async () => {
+    let state = bmState.get(id);
+    if (!state) {
+        let node;
+        try {
+            [node] = await chrome.bookmarks.get(id);
+        } catch (error) {
+            return;
+        }
+        if (!node) {
+            return;
+        }
+        bmRemember(node);
+        state = bmState.get(id);
+    }
+    if (info.title !== undefined) {
+        state.title = info.title;
+    }
+    if (info.url !== undefined) {
+        state.url = info.url;
+    }
+    if (await bmTagged(state.parentId)) {
+        return;
+    }
+    const key = JSON.stringify([state.title, state.url ?? null]);
+    if (bmEmitted.get(id) === key) {
+        return;
+    }
+    bmEmitted.set(id, key);
+    bmEmit('changed', { ...state });
+}));
+"#,
+    ),
+    (
+        "moved",
+        r#"chrome.bookmarks.onMoved.addListener((id, info) => bmInOrder(async () => {
+    const state = bmState.get(id);
+    if (state) {
+        state.parentId = info.parentId;
+    }
+    if (!(await bmTagged(info.parentId, info.oldParentId))) {
+        bmEmit('moved', { id, parentId: info.parentId, index: info.index, oldParentId: info.oldParentId, oldIndex: info.oldIndex });
+    }
+}));
+"#,
+    ),
+];
+
+fn generate_bookmarks(events: &[(String, Vec<String>)]) -> String {
+    let mut kinds = Vec::new();
+    for (event, exports) in events {
+        let name = event.trim_start_matches("chrome.bookmarks.");
+        if let Some(&(_, kind)) = BOOKMARK_EVENTS.iter().find(|(camel, _)| *camel == name) {
+            kinds.push((kind, exports.join(", ")));
+        }
+    }
+    let mut js = format!(
+        "const bmHandlers = {{\n{}\n}};\n",
+        kinds.iter().map(|(kind, exports)| format!("    {kind}: [{exports}],")).collect::<Vec<_>>().join("\n")
+    );
+    js.push_str(BOOKMARK_HELPERS);
+    let changed = kinds.iter().any(|(kind, _)| *kind == "changed");
+    for (kind, listener) in BOOKMARK_LISTENERS {
+        if kinds.iter().any(|(wanted, _)| wanted == kind) || changed {
+            js.push_str(listener);
+        }
+    }
     js
 }
 
@@ -1541,6 +1687,23 @@ mod tests {
         assert!(js.contains("chrome.webNavigation.onHistoryStateUpdated.addListener((details) => wnEmit('history_state_updated', details));"));
         assert!(!js.contains("onBeforeNavigate"));
         assert!(!js.contains("chrome.tabs.onRemoved"));
+    }
+
+    #[test]
+    fn bookmark_events_share_one_ordered_queue() {
+        let metadata = metadata_with_handlers(&[("made", "bookmarks", "on_created"), ("edited", "bookmarks", "on_changed"), ("also", "bookmarks", "on_changed")]);
+        let js = generate_background_js(&metadata, "test");
+        assert_eq!(js.matches("chrome.bookmarks.onCreated.addListener").count(), 1);
+        assert_eq!(js.matches("chrome.bookmarks.onChanged.addListener").count(), 1);
+        assert_eq!(js.matches("chrome.bookmarks.onRemoved.addListener").count(), 1);
+        assert_eq!(js.matches("chrome.bookmarks.onMoved.addListener").count(), 1);
+        assert!(js.contains("attach('bookmarks', () => {"));
+        assert!(!js.contains("removed: ["));
+        assert_eq!(js.matches("let bmQueue").count(), 1);
+        let moved = generate_background_js(&metadata_with_handlers(&[("moved", "bookmarks", "on_moved")]), "test");
+        assert!(moved.contains("chrome.bookmarks.onMoved.addListener"));
+        assert!(!moved.contains("chrome.bookmarks.onRemoved"));
+        assert!(!moved.contains("chrome.bookmarks.onCreated"));
     }
 
     #[test]

@@ -123,6 +123,10 @@ pub mod events {
     pub struct WebNavigationOnReferenceFragmentUpdated;
     pub struct WebNavigationOnCreatedNavigationTarget;
     pub struct WebNavigationOnTabReplaced;
+    pub struct BookmarksOnCreated;
+    pub struct BookmarksOnRemoved;
+    pub struct BookmarksOnChanged;
+    pub struct BookmarksOnMoved;
 }
 
 macro_rules! arity {
@@ -173,6 +177,10 @@ arity! {
     WebNavigationOnReferenceFragmentUpdated = 1,
     WebNavigationOnCreatedNavigationTarget = 1,
     WebNavigationOnTabReplaced = 1,
+    BookmarksOnCreated = 1,
+    BookmarksOnRemoved = 1,
+    BookmarksOnChanged = 1,
+    BookmarksOnMoved = 1,
 }
 
 impl EventArg<events::NotificationsOnClicked, 1> for String {}
