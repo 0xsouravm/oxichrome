@@ -628,6 +628,83 @@ extern "C" {
 }
 
 #[wasm_bindgen(inline_js = r#"
+export function web_navigation_call(method, arg) {
+    const webNavigation = globalThis.chrome?.webNavigation;
+    if (!webNavigation) {
+        throw new Error('oxichrome:no-permission');
+    }
+    return Promise.resolve(webNavigation[method](arg));
+}
+
+export function on_web_navigation_before_navigate(callback) {
+    globalThis.chrome?.webNavigation?.onBeforeNavigate.addListener(callback);
+}
+
+export function on_web_navigation_committed(callback) {
+    globalThis.chrome?.webNavigation?.onCommitted.addListener(callback);
+}
+
+export function on_web_navigation_dom_content_loaded(callback) {
+    globalThis.chrome?.webNavigation?.onDOMContentLoaded.addListener(callback);
+}
+
+export function on_web_navigation_completed(callback) {
+    globalThis.chrome?.webNavigation?.onCompleted.addListener(callback);
+}
+
+export function on_web_navigation_error_occurred(callback) {
+    globalThis.chrome?.webNavigation?.onErrorOccurred.addListener(callback);
+}
+
+export function on_web_navigation_history_state_updated(callback) {
+    globalThis.chrome?.webNavigation?.onHistoryStateUpdated.addListener(callback);
+}
+
+export function on_web_navigation_reference_fragment_updated(callback) {
+    globalThis.chrome?.webNavigation?.onReferenceFragmentUpdated.addListener(callback);
+}
+
+export function on_web_navigation_created_navigation_target(callback) {
+    globalThis.chrome?.webNavigation?.onCreatedNavigationTarget.addListener(callback);
+}
+
+export function on_web_navigation_tab_replaced(callback) {
+    globalThis.chrome?.webNavigation?.onTabReplaced.addListener(callback);
+}
+"#)]
+extern "C" {
+    #[wasm_bindgen(catch)]
+    pub fn web_navigation_call(method: &str, arg: &JsValue) -> Result<js_sys::Promise, JsValue>;
+
+    #[wasm_bindgen(js_name = on_web_navigation_before_navigate)]
+    pub fn chrome_web_navigation_on_before_navigate_add_listener(callback: &Closure<dyn FnMut(JsValue)>);
+
+    #[wasm_bindgen(js_name = on_web_navigation_committed)]
+    pub fn chrome_web_navigation_on_committed_add_listener(callback: &Closure<dyn FnMut(JsValue)>);
+
+    #[wasm_bindgen(js_name = on_web_navigation_dom_content_loaded)]
+    pub fn chrome_web_navigation_on_dom_content_loaded_add_listener(callback: &Closure<dyn FnMut(JsValue)>);
+
+    #[wasm_bindgen(js_name = on_web_navigation_completed)]
+    pub fn chrome_web_navigation_on_completed_add_listener(callback: &Closure<dyn FnMut(JsValue)>);
+
+    #[wasm_bindgen(js_name = on_web_navigation_error_occurred)]
+    pub fn chrome_web_navigation_on_error_occurred_add_listener(callback: &Closure<dyn FnMut(JsValue)>);
+
+    #[wasm_bindgen(js_name = on_web_navigation_history_state_updated)]
+    pub fn chrome_web_navigation_on_history_state_updated_add_listener(callback: &Closure<dyn FnMut(JsValue)>);
+
+    #[wasm_bindgen(js_name = on_web_navigation_reference_fragment_updated)]
+    pub fn chrome_web_navigation_on_reference_fragment_updated_add_listener(callback: &Closure<dyn FnMut(JsValue)>);
+
+    #[wasm_bindgen(js_name = on_web_navigation_created_navigation_target)]
+    pub fn chrome_web_navigation_on_created_navigation_target_add_listener(callback: &Closure<dyn FnMut(JsValue)>);
+
+    #[wasm_bindgen(js_name = on_web_navigation_tab_replaced)]
+    pub fn chrome_web_navigation_on_tab_replaced_add_listener(callback: &Closure<dyn FnMut(JsValue)>);
+}
+
+#[wasm_bindgen(inline_js = r#"
 export function cookies_call(method, arg) {
     const cookies = globalThis.chrome?.cookies;
     if (!cookies) {

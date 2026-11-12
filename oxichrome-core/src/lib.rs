@@ -19,6 +19,7 @@ pub mod scripting;
 pub mod side_panel;
 pub mod storage;
 pub mod tabs;
+pub mod web_navigation;
 pub mod windows;
 
 pub use js_bridge::__log_impl;

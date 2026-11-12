@@ -300,14 +300,28 @@ fn generate_listeners(metadata: &ExtensionMetadata) -> String {
         }
     }
 
-    let mut listeners = String::new();
+    let mut chunks: Vec<(String, String)> = Vec::new();
+    let mut add = |namespace: &str, js: String| match chunks.iter_mut().find(|(name, _)| name == namespace) {
+        Some((_, chunk)) => chunk.push_str(&js),
+        None => chunks.push((namespace.to_string(), js)),
+    };
+    let navigation: Vec<(String, Vec<String>)> = events
+        .iter()
+        .filter(|(event, _)| event.starts_with("chrome.webNavigation."))
+        .cloned()
+        .collect();
+    events.retain(|(event, _)| !event.starts_with("chrome.webNavigation."));
+    if !navigation.is_empty() {
+        add("webNavigation", generate_web_navigation(&navigation));
+    }
     if events
         .iter()
         .any(|(event, _)| event.starts_with("chrome.notifications."))
     {
-        listeners.push_str(NOTIFICATION_HELPERS);
+        add("notifications", NOTIFICATION_HELPERS.to_string());
     }
     for (event, exports) in &events {
+        let mut listeners = String::new();
         let handlers = exports.join(", ");
         if event == "chrome.runtime.onMessage" {
             listeners.push_str(&format!(
@@ -450,8 +464,290 @@ globalThis.chrome?.storage?.session?.get([idleKey, '__oxichrome_idle_interval'])
 "#
             ));
         }
+        add(event.split('.').nth(1).unwrap_or_default(), listeners);
+    }
+    let mut listeners = String::new();
+    if !chunks.is_empty() {
+        listeners.push_str(ATTACH_HELPER);
+    }
+    for (namespace, js) in &chunks {
+        listeners.push_str(&format!("attach('{namespace}', () => {{\n{js}}});\n\n"));
     }
     listeners
+}
+
+const ATTACH_HELPER: &str = r#"const attached = new Set();
+
+function attach(namespace, register) {
+    const tryAttach = () => {
+        if (!attached.has(namespace) && globalThis.chrome?.[namespace]) {
+            attached.add(namespace);
+            register();
+        }
+    };
+    tryAttach();
+    if (!attached.has(namespace)) {
+        globalThis.chrome?.permissions?.onAdded?.addListener(tryAttach);
+    }
+}
+
+"#;
+
+const WEB_NAVIGATION_LIFECYCLE: &str = r#"const wnFirefox = typeof globalThis.browser?.runtime?.getBrowserInfo === 'function';
+const wnFrames = new Map();
+const wnAborts = ['net::ERR_ABORTED', 'Error code 2152398850'];
+const wnPageErrors = {
+    deniedPortAccess: 'net::ERR_UNSAFE_PORT',
+    dnsNotFound: 'net::ERR_NAME_NOT_RESOLVED',
+    connectionFailure: 'net::ERR_CONNECTION_REFUSED',
+    netTimeout: 'net::ERR_TIMED_OUT',
+    netOffline: 'net::ERR_INTERNET_DISCONNECTED',
+    netReset: 'net::ERR_CONNECTION_RESET',
+    netInterrupt: 'net::ERR_CONNECTION_RESET',
+    blockedByPolicy: 'net::ERR_BLOCKED_BY_ADMINISTRATOR',
+};
+
+function wnErrorPage(url) {
+    return /^about:(neterror|certerror|blocked)\?/.test(url);
+}
+
+function wnPageError(url) {
+    if (url.startsWith('about:certerror')) {
+        return 'net::ERR_CERT_INVALID';
+    }
+    const code = new URLSearchParams(url.slice(url.indexOf('?') + 1)).get('e');
+    if (code && code.startsWith('nss')) {
+        return 'net::ERR_CERT_INVALID';
+    }
+    return wnPageErrors[code] ?? 'net::ERR_FAILED';
+}
+
+function wnBase(details) {
+    return {
+        tabId: details.tabId,
+        frameId: details.frameId,
+        parentFrameId: details.parentFrameId,
+        url: details.url,
+        timeStamp: details.timeStamp,
+    };
+}
+
+function wnState(details) {
+    const key = details.tabId + ':' + details.frameId;
+    let state = wnFrames.get(key);
+    if (!state) {
+        state = { phase: null, url: null, dupes: 0, held: null, last: details, page: null };
+        wnFrames.set(key, state);
+    }
+    return state;
+}
+
+function wnFail(state, details) {
+    state.phase = 'failed';
+    state.url = details.url;
+    wnEmit('error_occurred', details);
+}
+
+function wnRelease(state) {
+    const held = state.held;
+    if (!held) {
+        return;
+    }
+    clearTimeout(held.timer);
+    state.held = null;
+    if (held.kind === 'abort') {
+        wnFail(state, held.details);
+    } else {
+        state.phase = 'committed';
+        wnEmit('committed', held.details);
+    }
+}
+
+function wnHold(state, kind, details) {
+    state.held = { kind, details, timer: setTimeout(() => wnRelease(state), 500) };
+}
+
+chrome.webNavigation.onBeforeNavigate.addListener((details) => {
+    const state = wnState(details);
+    if (state.held) {
+        if (state.held.kind === 'abort' && state.held.details.url === details.url) {
+            clearTimeout(state.held.timer);
+            state.held = null;
+            return;
+        }
+        wnRelease(state);
+    }
+    if (state.phase === 'started' && state.url === details.url) {
+        state.dupes += 1;
+        return;
+    }
+    Object.assign(state, { phase: 'started', url: details.url, dupes: 0, last: details });
+    wnEmit('before_navigate', details);
+});
+
+chrome.webNavigation.onCommitted.addListener((details) => {
+    const state = wnState(details);
+    wnRelease(state);
+    if (state.phase === 'failed' && state.url === details.url) {
+        return;
+    }
+    if (state.phase !== 'started') {
+        if (details.url === 'about:blank') {
+            Object.assign(state, { phase: 'ghost', url: details.url });
+            return;
+        }
+        Object.assign(state, { phase: 'started', url: details.url, dupes: 0, last: details });
+        wnEmit('before_navigate', wnBase(details));
+        if (wnFirefox) {
+            wnHold(state, 'commit', details);
+            return;
+        }
+    }
+    state.phase = 'committed';
+    state.url = details.url;
+    state.page = !wnFirefox && details.frameId === 0 && details.url.startsWith('chrome-extension://') ? details : null;
+    wnEmit('committed', details);
+});
+
+chrome.webNavigation.onDOMContentLoaded.addListener((details) => {
+    const state = wnState(details);
+    if (wnErrorPage(details.url)) {
+        const failed = state.held && state.held.kind === 'commit' ? state.held.details : state.last;
+        if (state.held) {
+            clearTimeout(state.held.timer);
+            state.held = null;
+        }
+        if (state.phase !== 'failed') {
+            wnFail(state, { ...wnBase(failed), url: state.url ?? failed.url, timeStamp: details.timeStamp, error: wnPageError(details.url) });
+        }
+        return;
+    }
+    wnRelease(state);
+    if (state.phase === 'ghost' || state.phase === 'failed') {
+        return;
+    }
+    state.phase = 'loaded';
+    wnEmit('dom_content_loaded', details);
+});
+
+chrome.webNavigation.onCompleted.addListener((details) => {
+    if (wnErrorPage(details.url)) {
+        return;
+    }
+    const state = wnState(details);
+    wnRelease(state);
+    if (state.phase === 'ghost' || state.phase === 'failed' || state.phase === 'done') {
+        return;
+    }
+    if (state.phase === 'started') {
+        wnFail(state, { ...wnBase(details), error: 'net::ERR_ABORTED' });
+        return;
+    }
+    if (state.phase === 'committed') {
+        wnEmit('dom_content_loaded', details);
+    }
+    state.phase = 'done';
+    wnEmit('completed', details);
+});
+
+chrome.webNavigation.onErrorOccurred.addListener((details) => {
+    const state = wnState(details);
+    const abort = wnAborts.includes(details.error);
+    wnRelease(state);
+    if (abort && state.phase === 'started' && state.url === details.url && state.dupes > 0) {
+        state.dupes -= 1;
+        return;
+    }
+    if (state.phase === 'failed' && state.url === details.url) {
+        return;
+    }
+    if (abort && state.phase === 'started') {
+        wnHold(state, 'abort', details);
+        return;
+    }
+    wnFail(state, details);
+});
+
+chrome.tabs.onRemoved.addListener((tabId) => {
+    for (const [key, state] of wnFrames) {
+        if (!key.startsWith(tabId + ':')) {
+            continue;
+        }
+        wnRelease(state);
+        if (state.phase === 'started') {
+            wnFail(state, { ...wnBase(state.last), url: state.url, timeStamp: Date.now(), error: 'net::ERR_ABORTED' });
+        }
+        setTimeout(() => wnFrames.get(key) === state && wnFrames.delete(key), 10000);
+    }
+});
+
+chrome.tabs.onUpdated.addListener((tabId, change) => {
+    const state = wnFrames.get(tabId + ':0');
+    if (change.status !== 'complete' || !state || !state.page || state.phase !== 'committed') {
+        return;
+    }
+    const details = { ...state.page, timeStamp: Date.now() };
+    state.page = null;
+    state.phase = 'done';
+    wnEmit('dom_content_loaded', details);
+    wnEmit('completed', details);
+});
+"#;
+
+const WEB_NAVIGATION_EVENTS: &[(&str, &str, bool)] = &[
+    ("onBeforeNavigate", "before_navigate", true),
+    ("onCommitted", "committed", true),
+    ("onDomContentLoaded", "dom_content_loaded", true),
+    ("onCompleted", "completed", true),
+    ("onErrorOccurred", "error_occurred", true),
+    ("onHistoryStateUpdated", "history_state_updated", false),
+    ("onReferenceFragmentUpdated", "reference_fragment_updated", false),
+    ("onCreatedNavigationTarget", "created_navigation_target", false),
+    ("onTabReplaced", "tab_replaced", false),
+];
+
+fn generate_web_navigation(events: &[(String, Vec<String>)]) -> String {
+    if events.is_empty() {
+        return String::new();
+    }
+    let mut kinds = Vec::new();
+    let mut lifecycle = false;
+    let mut passthrough = String::new();
+    for (event, exports) in events {
+        let name = event.trim_start_matches("chrome.webNavigation.");
+        let Some(&(_, kind, core)) = WEB_NAVIGATION_EVENTS.iter().find(|(camel, _, _)| *camel == name) else {
+            continue;
+        };
+        kinds.push(format!("    {kind}: [{}],", exports.join(", ")));
+        if core {
+            lifecycle = true;
+        } else {
+            passthrough.push_str(&format!(
+                r#"chrome.webNavigation.{name}.addListener((details) => wnEmit('{kind}', details));
+"#
+            ));
+        }
+    }
+    let mut js = format!(
+        r#"const wnHandlers = {{
+{}
+}};
+
+function wnEmit(kind, details) {{
+    const handlers = wnHandlers[kind];
+    if (handlers) {{
+        dispatch(() => handlers.forEach((handler) => handler(details)));
+    }}
+}}
+
+"#,
+        kinds.join("\n")
+    );
+    if lifecycle {
+        js.push_str(WEB_NAVIGATION_LIFECYCLE);
+    }
+    js.push_str(&passthrough);
+    js
 }
 
 pub fn generate_background_js(metadata: &ExtensionMetadata, crate_name: &str) -> String {
@@ -1028,6 +1324,46 @@ mod tests {
         assert!(js.contains("if (state === last) {"));
         assert!(js.contains("session.set({ [idleKey]: state })"));
         assert!(js.contains("chrome.idle.queryState(saved.__oxichrome_idle_interval ?? 60).then(idleChanged"));
+    }
+
+    #[test]
+    fn web_navigation_events_share_one_normalizer() {
+        let metadata = metadata_with_handlers(&[
+            ("done", "web_navigation", "on_completed"),
+            ("loaded", "web_navigation", "on_dom_content_loaded"),
+            ("failed", "web_navigation", "on_error_occurred"),
+            ("other", "web_navigation", "on_completed"),
+        ]);
+        let js = generate_background_js(&metadata, "test");
+        for raw in ["onBeforeNavigate", "onCommitted", "onDOMContentLoaded", "onCompleted", "onErrorOccurred"] {
+            assert_eq!(js.matches(&format!("chrome.webNavigation.{raw}.addListener")).count(), 1, "{raw}");
+        }
+        assert!(!js.contains("onDomContentLoaded"));
+        assert!(js.contains("chrome.tabs.onRemoved.addListener"));
+        assert!(js.contains("attach('webNavigation', () => {"));
+        assert_eq!(js.matches("completed: [").count(), 1);
+        assert!(js.contains("dom_content_loaded: ["));
+        assert!(js.contains("error_occurred: ["));
+    }
+
+    #[test]
+    fn web_navigation_passthrough_events_skip_the_normalizer() {
+        let metadata = metadata_with_handlers(&[("pushed", "web_navigation", "on_history_state_updated")]);
+        let js = generate_background_js(&metadata, "test");
+        assert!(js.contains("chrome.webNavigation.onHistoryStateUpdated.addListener((details) => wnEmit('history_state_updated', details));"));
+        assert!(!js.contains("onBeforeNavigate"));
+        assert!(!js.contains("chrome.tabs.onRemoved"));
+    }
+
+    #[test]
+    fn listeners_wait_for_their_api() {
+        let metadata = metadata_with_handlers(&[("changed", "idle", "on_state_changed"), ("created", "downloads", "on_created"), ("updated", "tabs", "on_updated")]);
+        let js = generate_background_js(&metadata, "test");
+        assert_eq!(js.matches("const attached = new Set();").count(), 1);
+        for namespace in ["idle", "downloads", "tabs"] {
+            assert_eq!(js.matches(&format!("attach('{namespace}', () => {{")).count(), 1, "{namespace}");
+        }
+        assert!(js.contains("globalThis.chrome?.permissions?.onAdded?.addListener(tryAttach);"));
     }
 
     #[test]

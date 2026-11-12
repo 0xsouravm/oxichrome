@@ -504,6 +504,7 @@ fn check_event_permission(metadata: &ExtensionMetadata, namespace: &str, permiss
 fn check_event_permissions(metadata: &ExtensionMetadata) -> anyhow::Result<()> {
     check_event_permission(metadata, "downloads", "downloads", "Downloads")?;
     check_event_permission(metadata, "idle", "idle", "Idle")?;
+    check_event_permission(metadata, "web_navigation", "webNavigation", "WebNavigation")?;
     Ok(())
 }
 

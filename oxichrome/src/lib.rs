@@ -22,6 +22,7 @@ pub use oxichrome_core::scripting;
 pub use oxichrome_core::side_panel;
 pub use oxichrome_core::storage;
 pub use oxichrome_core::tabs;
+pub use oxichrome_core::web_navigation;
 pub use oxichrome_core::windows;
 
 pub use oxichrome_core::log;

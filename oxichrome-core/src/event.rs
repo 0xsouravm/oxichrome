@@ -114,6 +114,15 @@ pub mod events {
     pub struct DownloadsOnErased;
     pub struct CookiesOnChanged;
     pub struct IdleOnStateChanged;
+    pub struct WebNavigationOnBeforeNavigate;
+    pub struct WebNavigationOnCommitted;
+    pub struct WebNavigationOnDomContentLoaded;
+    pub struct WebNavigationOnCompleted;
+    pub struct WebNavigationOnErrorOccurred;
+    pub struct WebNavigationOnHistoryStateUpdated;
+    pub struct WebNavigationOnReferenceFragmentUpdated;
+    pub struct WebNavigationOnCreatedNavigationTarget;
+    pub struct WebNavigationOnTabReplaced;
 }
 
 macro_rules! arity {
@@ -155,6 +164,15 @@ arity! {
     DownloadsOnErased = 1,
     CookiesOnChanged = 1,
     IdleOnStateChanged = 1,
+    WebNavigationOnBeforeNavigate = 1,
+    WebNavigationOnCommitted = 1,
+    WebNavigationOnDomContentLoaded = 1,
+    WebNavigationOnCompleted = 1,
+    WebNavigationOnErrorOccurred = 1,
+    WebNavigationOnHistoryStateUpdated = 1,
+    WebNavigationOnReferenceFragmentUpdated = 1,
+    WebNavigationOnCreatedNavigationTarget = 1,
+    WebNavigationOnTabReplaced = 1,
 }
 
 impl EventArg<events::NotificationsOnClicked, 1> for String {}

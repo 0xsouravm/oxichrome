@@ -639,14 +639,22 @@ pub struct EventArgs {
 
 impl Parse for EventArgs {
     fn parse(input: ParseStream) -> syn::Result<Self> {
-        let namespace: Ident = input.parse()?;
-        input.parse::<Token![::]>()?;
-        let event_name: Ident = input.parse()?;
-
-        Ok(EventArgs {
-            namespace,
-            event_name,
-        })
+        let path: syn::Path = input.parse()?;
+        if !input.is_empty() {
+            return Err(input.error("expected only the event, like `#[oxichrome::on(tabs::on_updated)]`"));
+        }
+        let mut names: Vec<Ident> = path.segments.iter().map(|segment| segment.ident.clone()).collect();
+        if names.len() == 3 && names[0] == "oxichrome" {
+            names.remove(0);
+        }
+        let wrong = path.leading_colon.is_some() || path.segments.iter().any(|segment| !segment.arguments.is_none());
+        match <[Ident; 2]>::try_from(names) {
+            Ok([namespace, event_name]) if !wrong => Ok(EventArgs { namespace, event_name }),
+            _ => Err(syn::Error::new_spanned(
+                &path,
+                "name the event as `module::event`, like `#[oxichrome::on(tabs::on_updated)]` or `#[oxichrome::on(oxichrome::tabs::on_updated)]`",
+            )),
+        }
     }
 }
 
@@ -1335,6 +1343,16 @@ mod tests {
         let args: EventArgs = syn::parse2(tokens).unwrap();
         assert_eq!(args.namespace.to_string(), "runtime");
         assert_eq!(args.event_name.to_string(), "on_installed");
+    }
+
+    #[test]
+    fn parse_event_args_full_path() {
+        let args: EventArgs = syn::parse2(quote::quote! { oxichrome::web_navigation::on_completed }).unwrap();
+        assert_eq!(args.namespace.to_string(), "web_navigation");
+        assert_eq!(args.event_name.to_string(), "on_completed");
+        for bad in [quote::quote! { on_completed }, quote::quote! { a::b::c }, quote::quote! { ::tabs::on_updated }, quote::quote! { tabs::on_updated, x }, quote::quote! { oxichrome::a::b::c }] {
+            assert!(syn::parse2::<EventArgs>(bad).is_err());
+        }
     }
 
     #[test]

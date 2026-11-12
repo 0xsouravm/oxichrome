@@ -180,7 +180,9 @@ async fn on_alarm(alarm: oxichrome::alarms::Alarm) {
 }
 ```
 
-Listeners are registered synchronously when the background script starts, and events that arrive before WASM is ready are delivered once it is. This covers `on_installed` and events that wake a stopped service worker.
+The event can also be written with the crate in front, like `#[oxichrome::on(oxichrome::tabs::on_updated)]`.
+
+Listeners are registered synchronously when the background script starts, and events that arrive before WASM is ready are delivered once it is. This covers `on_installed` and events that wake a stopped service worker. When an event's API comes from a permission in `optional_permissions` that hasn't been granted yet, its listeners are added the moment it is granted instead, and the rest of the background keeps working.
 
 | Event | Typed arguments |
 |---|---|
@@ -636,6 +638,11 @@ cookies::remove_all(Query::new().domain("example.com")).await?;                 
 use oxichrome::idle::{self, State};
 let state: State = idle::state(Duration::from_secs(300)).await?;   // Active, Idle (no input for 5 minutes) or Locked
 idle::set_detection_interval(Duration::from_secs(120)).await?;      // when on_state_changed reports Idle (default 60 s)
+
+// Web navigation (requires the "webNavigation" permission)
+use oxichrome::web_navigation::{self, FrameId};
+let main = web_navigation::frame(tab_id, FrameId::MAIN).await?;     // Option<Frame>: None once the tab or frame is gone
+let all = web_navigation::frames(tab_id).await?;                     // Option<Vec<Frame>>, sorted by frame id
 // Runtime
 let url = oxichrome::runtime::get_url("icon.png");
 oxichrome::runtime::send_message(&msg).await?;
@@ -746,6 +753,36 @@ async fn changed(state: State) {} // once per change
 ```
 
 Firefox doesn't wake a sleeping background page for idle changes, and sends `idle` again each time the page restarts. oxichrome remembers the last state it sent (in `storage.session`, so it adds the `storage` permission when you listen to idle events) and sends each state once. When the background starts, it checks the state and sends a change it missed while asleep, so in Firefox a change can arrive late, and a short burst of activity while the page sleeps can be missed. Listening to `idle::on_state_changed` without `Idle` in `permissions` is a build error.
+
+Web navigation events take typed arguments: `Navigation` for `on_before_navigate`, `on_dom_content_loaded` and `on_completed`; `Commit` (adding `transition` and `qualifiers`) for `on_committed`, `on_history_state_updated` and `on_reference_fragment_updated`; `Failure` (adding `error: NavError`) for `on_error_occurred`; `Target` for `on_created_navigation_target`; and `Replaced` for `on_tab_replaced`.
+
+```rust
+use oxichrome::web_navigation::{self, Commit, Failure, NavError, Navigation};
+
+#[oxichrome::on(web_navigation::on_completed)]
+async fn loaded(nav: Navigation) {
+    if nav.is_top_level() {
+        oxichrome::log!("tab {} loaded {}", nav.tab_id, nav.url);
+    }
+}
+
+#[oxichrome::on(web_navigation::on_error_occurred)]
+async fn failed(failure: Failure) {
+    if failure.error != NavError::Aborted {
+        oxichrome::log!("{} failed: {}", failure.url, failure.error);
+    }
+}
+```
+
+Every navigation in a frame arrives the same way in both browsers: `on_before_navigate`, then either `on_committed`, `on_dom_content_loaded` and `on_completed`, or `on_error_occurred` and nothing else. The browsers don't send that on their own, so oxichrome evens it out:
+
+- Firefox sends `on_before_navigate` twice and a made-up abort when a tab is sent to a new address; you get one `on_before_navigate`.
+- When a page can't be reached, Firefox commits its own error page and sends events for it; you get only `on_error_occurred`. Firefox sends no error at all for a blocked port; you get `BlockedPort`, like in Chrome.
+- A download, a `204 No Content` or a tab closed while loading ends in `Aborted` in both browsers (Firefox sends `on_completed` for a download and nothing for a closed tab).
+- Chrome sends no `on_before_navigate`, `on_dom_content_loaded` or `on_completed` for extension pages, and Firefox skips `on_dom_content_loaded` when going back to a cached page; both get the full set.
+- The `about:blank` Firefox commits in a new window before the real address is dropped.
+
+`NavError` names the common failures (`NameNotResolved`, `ConnectionRefused`, `TimedOut`, `Offline`, `Certificate` and so on) from both browsers' codes; anything else is `Other` with the browser's text. `FrameId::MAIN` is the top frame; Firefox's frame ids for inner frames go past 32 bits, so a `FrameId` holds a `u64`. `is_top_level()` is true for a tab's top frame, which in Chrome includes pages it loads ahead of time. Filter by URL inside the handler: the browsers' own URL filters differ (Firefox refuses some Chrome accepts, and a bad pattern in Firefox silently stops other listeners). Listening to a `web_navigation` event without `WebNavigation` in `permissions` is a build error.
 
 `chrome.action` needs `action` in the manifest. oxichrome adds it when your extension has a `#[popup]` or an `#[on(action::on_clicked)]` handler. The click event doesn't fire while a popup is set.
 
