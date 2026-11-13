@@ -1470,3 +1470,17 @@ extern "C" {
     #[wasm_bindgen(catch)]
     pub fn search_query(details: &str) -> Result<js_sys::Promise, JsValue>;
 }
+
+#[wasm_bindgen(inline_js = r#"
+export function top_sites_get() {
+    const topSites = globalThis.chrome?.topSites;
+    if (!topSites?.get) {
+        throw new Error('oxichrome:no-permission');
+    }
+    return Promise.resolve(topSites.get()).then((sites) => sites ?? []);
+}
+"#)]
+extern "C" {
+    #[wasm_bindgen(catch)]
+    pub fn top_sites_get() -> Result<js_sys::Promise, JsValue>;
+}

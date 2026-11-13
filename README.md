@@ -749,6 +749,9 @@ let visits = history::visits("https://www.rust-lang.org/").await?;      // oldes
 history::delete("https://www.rust-lang.org/").await?;
 history::delete_range(week_ago, js_sys::Date::now()).await?;             // both ends included; also delete_all
 
+// Most visited sites (requires the "topSites" permission)
+let sites = oxichrome::top_sites::get().await?;                         // Vec<Site>, each with url and title
+
 // Search with the user's default search engine (requires the "search" permission)
 use oxichrome::search::{self, Where};
 search::query("rust web extensions", Where::NewTab).await?;           // also CurrentTab, NewWindow, Tab(tab_id)
@@ -944,6 +947,8 @@ async fn removed(removed: Removed) {} // Removed::All, or Removed::Urls(urls) wi
 ```
 
 `on_title_changed` exists only in Firefox, so oxichrome leaves it out. Listening to a `history` event without `History` in `permissions` is a build error.
+
+`top_sites::get` lists the user's most visited sites, one page per site in both browsers, most visited first. Each browser picks which page stands for a site and how many to list, and a new profile can start with the browser's own suggestions (Chrome lists its Web Store). Search shortcuts and duplicates are left out, and a page without a title has an empty `title`.
 
 `search::query` searches with whatever engine the user picked, in the place you name. `Where::CurrentTab` is the tab the user is looking at in the current window, the same in both browsers (Chrome would otherwise replace the extension page that made the call). Blank text is an error (Chrome refuses empty text, Firefox would search for nothing), and so is a tab that doesn't exist. Neither browser lets an extension choose the engine in both, so oxichrome doesn't.
 

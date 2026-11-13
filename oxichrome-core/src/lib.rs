@@ -24,6 +24,7 @@ pub mod search;
 pub mod side_panel;
 pub mod storage;
 pub mod tabs;
+pub mod top_sites;
 pub mod web_navigation;
 pub mod windows;
 
