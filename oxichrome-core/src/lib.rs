@@ -20,6 +20,7 @@ pub mod omnibox;
 pub mod permissions;
 pub mod runtime;
 pub mod scripting;
+pub mod search;
 pub mod side_panel;
 pub mod storage;
 pub mod tabs;

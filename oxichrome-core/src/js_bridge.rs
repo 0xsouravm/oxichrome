@@ -1444,3 +1444,29 @@ extern "C" {
     #[wasm_bindgen(js_name = on_history_visit_removed)]
     pub fn chrome_history_on_visit_removed_add_listener(callback: &Closure<dyn FnMut(JsValue)>);
 }
+
+#[wasm_bindgen(inline_js = r#"
+export function search_query(details) {
+    const search = globalThis.chrome?.search;
+    if (!search?.query) {
+        throw new Error('oxichrome:no-permission');
+    }
+    const query = JSON.parse(details);
+    const run = async () => {
+        if (query.disposition === 'CURRENT_TAB') {
+            const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+            if (!tab) {
+                throw new Error('oxichrome:no-current-tab');
+            }
+            delete query.disposition;
+            query.tabId = tab.id;
+        }
+        await search.query(query);
+    };
+    return run();
+}
+"#)]
+extern "C" {
+    #[wasm_bindgen(catch)]
+    pub fn search_query(details: &str) -> Result<js_sys::Promise, JsValue>;
+}

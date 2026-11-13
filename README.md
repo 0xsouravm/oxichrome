@@ -749,6 +749,10 @@ let visits = history::visits("https://www.rust-lang.org/").await?;      // oldes
 history::delete("https://www.rust-lang.org/").await?;
 history::delete_range(week_ago, js_sys::Date::now()).await?;             // both ends included; also delete_all
 
+// Search with the user's default search engine (requires the "search" permission)
+use oxichrome::search::{self, Where};
+search::query("rust web extensions", Where::NewTab).await?;           // also CurrentTab, NewWindow, Tab(tab_id)
+
 // Network rules (requires the "declarativeNetRequest" permission)
 use oxichrome::declarative_net_request::{self as dnr, Headers, Redirect, ResourceType, Rule, Transform};
 dnr::update_dynamic_rules(&[], &[Rule::block(1).url_filter("||ads.example^").resource_types([ResourceType::Script, ResourceType::Image])]).await?;
@@ -940,6 +944,8 @@ async fn removed(removed: Removed) {} // Removed::All, or Removed::Urls(urls) wi
 ```
 
 `on_title_changed` exists only in Firefox, so oxichrome leaves it out. Listening to a `history` event without `History` in `permissions` is a build error.
+
+`search::query` searches with whatever engine the user picked, in the place you name. `Where::CurrentTab` is the tab the user is looking at in the current window, the same in both browsers (Chrome would otherwise replace the extension page that made the call). Blank text is an error (Chrome refuses empty text, Firefox would search for nothing), and so is a tab that doesn't exist. Neither browser lets an extension choose the engine in both, so oxichrome doesn't.
 
 ### Network rules
 

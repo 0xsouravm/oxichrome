@@ -23,6 +23,7 @@ pub use oxichrome_core::permissions;
 pub use oxichrome_core::permissions::Permission;
 pub use oxichrome_core::runtime;
 pub use oxichrome_core::scripting;
+pub use oxichrome_core::search;
 pub use oxichrome_core::side_panel;
 pub use oxichrome_core::storage;
 pub use oxichrome_core::tabs;
