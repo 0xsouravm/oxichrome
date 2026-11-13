@@ -643,10 +643,10 @@ impl Parse for ExtensionArgs {
         })?;
 
         for optional in &optional_permissions {
-            if permissions.iter().any(|required| required.info.ident == optional.info.ident) {
+            if permissions.iter().any(|required| required.info.name == optional.info.name) {
                 return Err(syn::Error::new(
-                    optional.ident.span(),
-                    format!("`{}` is in `permissions` too; a permission is either granted at install or asked for later, so keep it in one list", optional.ident),
+                    optional.span(),
+                    format!("`{}` is in `permissions` too; a permission is either granted at install or asked for later, so keep it in one list", optional.written()),
                 ));
             }
         }

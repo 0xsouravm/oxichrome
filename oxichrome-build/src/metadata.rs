@@ -18,6 +18,7 @@ pub struct ExtensionMetadata {
     pub optional_host_permissions: Vec<String>,
     pub chrome_only: Vec<(String, String)>,
     pub firefox_only: Vec<(String, String)>,
+    pub custom_permissions: Vec<String>,
     pub background_exports: Vec<String>,
     pub event_handlers: Vec<EventHandler>,
     pub has_popup: bool,
@@ -173,6 +174,7 @@ impl ContentScript {
 
 #[derive(Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+#[allow(clippy::large_enum_variant)]
 enum Entry {
     Extension {
         name: String,
@@ -193,6 +195,8 @@ enum Entry {
         chrome_only: Vec<(String, String)>,
         #[serde(default)]
         firefox_only: Vec<(String, String)>,
+        #[serde(default)]
+        custom_permissions: Vec<String>,
         icons: Vec<(u32, String)>,
         action: Option<ActionMetadata>,
         #[serde(default)]
@@ -366,6 +370,7 @@ pub fn parse_entries(text: &str) -> anyhow::Result<ExtensionMetadata> {
                 optional_host_permissions,
                 chrome_only,
                 firefox_only,
+                custom_permissions,
                 icons,
                 action,
                 rule_sets,
@@ -377,6 +382,7 @@ pub fn parse_entries(text: &str) -> anyhow::Result<ExtensionMetadata> {
                 metadata.optional_host_permissions = optional_host_permissions;
                 metadata.chrome_only = chrome_only;
                 metadata.firefox_only = firefox_only;
+                metadata.custom_permissions = custom_permissions;
                 extensions.push(name.clone());
                 metadata.name = Some(name);
                 metadata.display_name = display_name;

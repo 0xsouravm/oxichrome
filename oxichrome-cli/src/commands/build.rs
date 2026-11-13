@@ -113,6 +113,16 @@ pub fn run(release: bool, browser: Browser) -> Result<()> {
         );
     }
 
+    if !metadata.custom_permissions.is_empty() {
+        let names: Vec<String> = metadata.custom_permissions.iter().map(|name| format!("`{name}`")).collect();
+        println!(
+            "[oxichrome] Note: {} {} written as `Custom`, so oxichrome can't check {}; a browser that doesn't know a name ignores it",
+            names.join(", "),
+            if names.len() == 1 { "is" } else { "are" },
+            if names.len() == 1 { "it" } else { "them" }
+        );
+    }
+
     let left_out_events = shims::left_out_events(&metadata, browser);
     if !left_out_events.is_empty() {
         println!(

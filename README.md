@@ -579,6 +579,30 @@ async fn removed(set: PermissionSet) {}
 
 An on-demand script can rely on optional permissions: put `Scripting` in `optional_permissions` and the sites in `optional_host_permissions`, and ask before running it. Until then, `run` returns `Err` saying what to ask for.
 
+### Permissions oxichrome doesn't have yet
+
+When a browser adds a permission before oxichrome does, write it as `Custom` with the browser's exact name. It goes into the manifest for both browsers as written:
+
+```rust
+#[oxichrome::extension(
+    name = "My Extension",
+    version = "0.1.0",
+    permissions = [Storage, Custom("newApi")],
+    optional_permissions = [Custom("otherApi")],
+)]
+struct Extension;
+
+#[oxichrome::background]
+async fn start() {
+    let granted = oxichrome::permissions::contains(oxichrome::Permission::Custom("newApi")).await;
+    let name = String::from("otherApi");
+    let asked = oxichrome::permissions::contains(oxichrome::Permission::custom(&name)).await;   // a name you only have at runtime
+    let _ = (granted, asked);
+}
+```
+
+oxichrome can't check a `Custom` name, so the build prints a note listing them. A browser that doesn't know a name ignores it: Firefox drops it from the manifest, and Chrome keeps it but never grants it. `contains` asks the browser for each `Custom` name, so it is `false` wherever the name isn't known, even in `permissions`; asking for or removing an unknown one returns `Err` saying the browser doesn't know it. A name oxichrome already has is a build error that tells you which one to write (`Custom("tabs")` becomes `Tabs`), and so is an empty name, a site pattern (it goes in `host_permissions`) or a name with characters other than letters, digits, `.`, `_` and `-`.
+
 ## Translations
 
 Messages live where browsers look for them, in `static/_locales/<locale>/messages.json`, in the [format both browsers use](https://developer.chrome.com/docs/extensions/reference/api/i18n#concepts_and_usage):

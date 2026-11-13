@@ -122,6 +122,20 @@ table! {
 pub struct Declared {
     pub ident: Ident,
     pub info: &'static Info,
+    pub custom: Option<LitStr>,
+}
+
+impl Declared {
+    pub fn written(&self) -> String {
+        match &self.custom {
+            Some(name) => format!("Custom({:?})", name.value()),
+            None => self.ident.to_string(),
+        }
+    }
+
+    pub fn span(&self) -> proc_macro2::Span {
+        self.custom.as_ref().map(LitStr::span).unwrap_or_else(|| self.ident.span())
+    }
 }
 
 pub fn distance(a: &str, b: &str) -> usize {
@@ -152,12 +166,50 @@ fn unknown(word: &str) -> String {
     close.sort_by_key(|info| distance(info.ident, &compact));
     match close.first() {
         Some(info) => format!("`{word}` isn't a permission; did you mean `{}`?", info.ident),
-        None => format!("`{word}` isn't a permission either browser knows; see `oxichrome::Permission` for the list"),
+        None => {
+            let mut chars = compact.chars();
+            let guess: String = chars.next().map(|first| first.to_ascii_lowercase().to_string() + chars.as_str()).unwrap_or_default();
+            format!("`{word}` isn't a permission oxichrome knows; see `oxichrome::Permission` for the list, or if the browser has it and oxichrome doesn't yet, write `Custom(\"{guess}\")` with the browser's exact name")
+        }
     }
 }
 
 fn looks_like_host(text: &str) -> bool {
     text == "<all_urls>" || text.contains("://")
+}
+
+fn custom(input: ParseStream, ident: &Ident, optional: bool) -> syn::Result<(&'static Info, LitStr)> {
+    if !input.peek(syn::token::Paren) {
+        return Err(syn::Error::new(ident.span(), "write the permission's name in quotes, like `Custom(\"newApi\")`"));
+    }
+    let inner;
+    syn::parenthesized!(inner in input);
+    let Ok(text) = inner.parse::<LitStr>() else {
+        return Err(syn::Error::new(ident.span(), "write the permission's name in quotes, like `Custom(\"newApi\")`"));
+    };
+    if !inner.is_empty() {
+        return Err(inner.error("`Custom(...)` takes one name, like `Custom(\"newApi\")`"));
+    }
+    let value = text.value();
+    let host_key = if optional { "optional_host_permissions" } else { "host_permissions" };
+    let fail = |message: String| Err(syn::Error::new(text.span(), message));
+    if value.trim().is_empty() {
+        return fail("the custom permission's name is empty; write the name the browser uses, like `Custom(\"newApi\")`".to_string());
+    }
+    if looks_like_host(&value) {
+        return fail(format!("`{value}` is a site pattern; move it to `{host_key}`, without `Custom`"));
+    }
+    if value.eq_ignore_ascii_case("menus") {
+        return fail("write `ContextMenus`; Firefox's `menus` is the same permission, and `ContextMenus` works in both browsers".to_string());
+    }
+    if let Some(info) = TABLE.iter().find(|info| info.name.eq_ignore_ascii_case(&value)) {
+        return fail(format!("`{value}` is already a permission oxichrome knows; write `{}` so it gets checked for both browsers", info.ident));
+    }
+    if let Some(bad) = value.chars().find(|c| !(c.is_ascii_alphanumeric() || "._-".contains(*c))) {
+        return fail(format!("`{value}` has {bad:?} in it; permission names use only letters, digits, `.`, `_` and `-`"));
+    }
+    let info = Box::leak(Box::new(Info { ident: "Custom", name: Box::leak(value.into_boxed_str()), chrome: Any, firefox: Any }));
+    Ok((info, text))
 }
 
 pub fn parse_list(input: ParseStream, key: &str) -> syn::Result<Vec<Declared>> {
@@ -181,28 +233,35 @@ pub fn parse_list(input: ParseStream, key: &str) -> syn::Result<Vec<Declared>> {
         }
         let ident: Ident = content.parse()?;
         let name = ident.to_string();
-        let Some(info) = TABLE.iter().find(|info| info.ident == name) else {
-            return Err(syn::Error::new(ident.span(), unknown(&name)));
+        let (info, custom_name) = if name == "Custom" {
+            let (info, text) = custom(&content, &ident, optional)?;
+            (info, Some(text))
+        } else {
+            match TABLE.iter().find(|info| info.ident == name) {
+                Some(info) => (info, None),
+                None => return Err(syn::Error::new(ident.span(), unknown(&name))),
+            }
         };
-        if declared.iter().any(|seen| seen.info.ident == info.ident) {
-            return Err(syn::Error::new(ident.span(), format!("`{name}` is listed twice in `{key}`")));
+        let entry = Declared { ident, info, custom: custom_name };
+        if declared.iter().any(|seen| seen.info.name == info.name) {
+            return Err(syn::Error::new(entry.span(), format!("`{}` is listed twice in `{key}`", entry.written())));
         }
         let browsers = [("Chrome", info.chrome), ("Firefox", info.firefox)];
         for (browser, support) in browsers {
             if optional && support == RequiredOnly {
                 return Err(syn::Error::new(
-                    ident.span(),
+                    entry.ident.span(),
                     format!("{browser} can't ask for `{name}` later, only grant it at install; move it to `permissions`"),
                 ));
             }
             if !optional && support == OptionalOnly {
                 return Err(syn::Error::new(
-                    ident.span(),
+                    entry.ident.span(),
                     format!("{browser} only grants `{name}` when the extension asks for it; move it to `optional_permissions`"),
                 ));
             }
         }
-        declared.push(Declared { ident, info });
+        declared.push(entry);
         if !content.is_empty() {
             content.parse::<Token![,]>()?;
         }
@@ -229,13 +288,34 @@ mod tests {
         assert!(err(quote::quote! { [Tab] }, "permissions").contains("did you mean `Tabs`?"));
         assert!(err(quote::quote! { [tabs] }, "permissions").contains("write `Tabs`"));
         assert!(err(quote::quote! { [Menus] }, "permissions").contains("write `ContextMenus`"));
-        assert!(err(quote::quote! { [Nope] }, "permissions").contains("isn't a permission either browser knows"));
+        assert!(err(quote::quote! { [Nope] }, "permissions").contains("isn't a permission oxichrome knows"));
+        assert!(err(quote::quote! { [NewApi] }, "permissions").contains("write `Custom(\"newApi\")`"));
+        assert!(err(quote::quote! { ["newApi"] }, "permissions").contains("write `Custom(\"newApi\")`"));
         assert!(err(quote::quote! { [Tabs, Tabs] }, "permissions").contains("listed twice"));
         assert!(err(quote::quote! { [Storage] }, "optional_permissions").contains("Firefox can't ask for `Storage` later"));
         assert!(err(quote::quote! { [Debugger] }, "optional_permissions").contains("Chrome can't ask for `Debugger` later"));
         assert!(err(quote::quote! { [UserScripts] }, "permissions").contains("Firefox only grants `UserScripts` when"));
         let ok = syn::parse::Parser::parse2(|input: ParseStream| parse_list(input, "optional_permissions"), quote::quote! { [History, Bookmarks, UserScripts] }).unwrap();
         assert_eq!(ok.iter().map(|d| d.info.name).collect::<Vec<_>>(), ["history", "bookmarks", "userScripts"]);
+    }
+
+    #[test]
+    fn custom_names_are_checked() {
+        assert!(err(quote::quote! { [Custom] }, "permissions").contains("like `Custom(\"newApi\")`"));
+        assert!(err(quote::quote! { [Custom(newApi)] }, "permissions").contains("in quotes"));
+        assert!(err(quote::quote! { [Custom("a", "b")] }, "permissions").contains("takes one name"));
+        assert!(err(quote::quote! { [Custom("")] }, "permissions").contains("name is empty"));
+        assert!(err(quote::quote! { [Custom("  ")] }, "permissions").contains("name is empty"));
+        assert!(err(quote::quote! { [Custom("tabs")] }, "permissions").contains("write `Tabs`"));
+        assert!(err(quote::quote! { [Custom("TABS")] }, "permissions").contains("write `Tabs`"));
+        assert!(err(quote::quote! { [Custom("menus")] }, "permissions").contains("write `ContextMenus`"));
+        assert!(err(quote::quote! { [Custom("https://a.com/*")] }, "optional_permissions").contains("move it to `optional_host_permissions`"));
+        assert!(err(quote::quote! { [Custom("<all_urls>")] }, "permissions").contains("move it to `host_permissions`"));
+        assert!(err(quote::quote! { [Custom("new api")] }, "permissions").contains("has ' ' in it"));
+        assert!(err(quote::quote! { [Custom("newApi"), Custom("newApi")] }, "permissions").contains("`Custom(\"newApi\")` is listed twice"));
+        let ok = syn::parse::Parser::parse2(|input: ParseStream| parse_list(input, "optional_permissions"), quote::quote! { [Tabs, Custom("newApi"), Custom("other.thing")] }).unwrap();
+        assert_eq!(ok.iter().map(|d| d.info.name).collect::<Vec<_>>(), ["tabs", "newApi", "other.thing"]);
+        assert_eq!(ok[1].written(), "Custom(\"newApi\")");
     }
 
     #[test]

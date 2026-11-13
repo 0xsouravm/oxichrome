@@ -19,6 +19,7 @@ macro_rules! permissions {
         #[non_exhaustive]
         pub enum Permission {
             $($(#[$doc])* $variant,)*
+            Custom(&'static str),
         }
 
         impl Permission {
@@ -27,6 +28,7 @@ macro_rules! permissions {
             pub fn name(self) -> &'static str {
                 match self {
                     $(Permission::$variant => $name,)*
+                    Permission::Custom(name) => name,
                 }
             }
 
@@ -134,6 +136,38 @@ permissions! {
     WebRequestFilterResponseServiceWorkerScript = "webRequestFilterResponse.serviceWorkerScript",
 }
 
+thread_local! {
+    static INTERNED: RefCell<Vec<&'static str>> = const { RefCell::new(Vec::new()) };
+}
+
+impl Permission {
+    pub fn custom(name: impl AsRef<str>) -> Permission {
+        Permission::from_any(name.as_ref())
+    }
+
+    fn from_any(name: &str) -> Permission {
+        if let Some(known) = Permission::from_name(name) {
+            return known;
+        }
+        INTERNED.with(|interned| {
+            let mut interned = interned.borrow_mut();
+            let name = match interned.iter().find(|seen| **seen == name) {
+                Some(seen) => *seen,
+                None => {
+                    let leaked: &'static str = Box::leak(name.to_string().into_boxed_str());
+                    interned.push(leaked);
+                    leaked
+                }
+            };
+            Permission::Custom(name)
+        })
+    }
+
+    fn same(self, other: Permission) -> bool {
+        Permission::from_any(self.name()) == Permission::from_any(other.name())
+    }
+}
+
 impl std::fmt::Display for Permission {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(self.name())
@@ -149,8 +183,7 @@ impl Serialize for Permission {
 impl<'de> Deserialize<'de> for Permission {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> StdResult<Self, D::Error> {
         let name = String::deserialize(deserializer)?;
-        Permission::from_name(&name)
-            .ok_or_else(|| serde::de::Error::custom(format!("unknown permission `{name}`")))
+        Ok(Permission::from_any(&name))
     }
 }
 
@@ -174,7 +207,8 @@ impl<'de> Deserialize<'de> for PermissionSet {
         let mut permissions: Vec<Permission> = raw
             .permissions
             .iter()
-            .filter_map(|name| Permission::from_name(name))
+            .filter(|name| !name.starts_with("internal:"))
+            .map(|name| Permission::from_any(name))
             .collect();
         permissions.sort();
         permissions.dedup();
@@ -195,6 +229,7 @@ impl PermissionSet {
     }
 
     pub fn permission(mut self, permission: Permission) -> Self {
+        let permission = Permission::from_any(permission.name());
         if !self.permissions.contains(&permission) {
             self.permissions.push(permission);
         }
@@ -241,19 +276,46 @@ fn js_error(message: String) -> OxichromeError {
     OxichromeError::Js(JsError::new(JsValue::from_str(&message)))
 }
 
-fn browser_error(error: JsValue) -> OxichromeError {
-    let message = js_sys::Reflect::get(&error, &JsValue::from_str("message"))
+fn error_text(error: &JsValue) -> String {
+    js_sys::Reflect::get(error, &JsValue::from_str("message"))
         .ok()
         .and_then(|message| message.as_string())
         .or_else(|| error.as_string())
-        .unwrap_or_else(|| format!("{error:?}"));
+        .unwrap_or_else(|| format!("{error:?}"))
+}
+
+fn unrecognized(error: &JsValue) -> bool {
+    error_text(error).to_ascii_lowercase().contains("not a recognized permission")
+}
+
+fn custom_unknown(names: &[&str]) -> OxichromeError {
+    let names: Vec<String> = names.iter().map(|name| format!("`{name}`")).collect();
+    OxichromeError::InvalidArgument(format!(
+        "{} isn't a permission this browser knows, or isn't in `optional_permissions` in #[oxichrome::extension]; a `Custom` name goes to the browser exactly as written, so check it",
+        names.join(", ")
+    ))
+}
+
+fn set_error(set: &PermissionSet, error: JsValue) -> OxichromeError {
+    let custom: Vec<&str> = set.permissions.iter().filter_map(|permission| match permission {
+        Permission::Custom(name) => Some(*name),
+        _ => None,
+    }).collect();
+    if unrecognized(&error) && !custom.is_empty() {
+        return custom_unknown(&custom);
+    }
+    browser_error(error)
+}
+
+fn browser_error(error: JsValue) -> OxichromeError {
+    let message = error_text(&error);
     if message.starts_with("[oxichrome]") {
         return OxichromeError::InvalidArgument(message.trim_start_matches("[oxichrome] ").to_string());
     }
     let lower = message.to_ascii_lowercase();
     if lower.contains("not a recognized permission") {
         return OxichromeError::InvalidArgument(format!(
-            "{message} (this browser doesn't have it; the build leaves it out of this browser's manifest)"
+            "{message} (this browser doesn't know it; a `Custom` name goes to the browser exactly as written, so check the name)"
         ));
     }
     if lower.contains("user gesture") || lower.contains("user input handler") {
@@ -338,7 +400,7 @@ impl Declared {
     }
 
     fn kind(&self, permission: Permission) -> Kind {
-        let listed = |names: &[String]| names.iter().any(|name| Permission::from_name(name) == Some(permission));
+        let listed = |names: &[String]| names.iter().any(|name| Permission::from_any(name).same(permission));
         if listed(&self.permissions) {
             Kind::Required
         } else if listed(&self.optional) {
@@ -349,6 +411,9 @@ impl Declared {
     }
 
     fn missing(&self, permission: Permission) -> OxichromeError {
+        if let Permission::Custom(name) = permission {
+            return custom_unknown(&[name]);
+        }
         OxichromeError::InvalidArgument(format!(
             "`{permission:?}` isn't in `optional_permissions` in #[oxichrome::extension], or this browser doesn't have it (the build leaves out permissions a browser doesn't know)"
         ))
@@ -383,11 +448,6 @@ fn set_to_js(set: &PermissionSet) -> Result<JsValue> {
     crate::json::to_js(set)
 }
 
-async fn settle(promise: js_sys::Promise) -> Result<bool> {
-    let value = JsFuture::from(promise).await.map_err(browser_error)?;
-    Ok(value.as_bool() == Some(true))
-}
-
 pub fn request_on_click<E, F, Fut>(set: impl Into<PermissionSet>, then: F) -> impl FnMut(E) + 'static
 where
     E: AsRef<web_sys::Event>,
@@ -397,7 +457,7 @@ where
     let set = set.into();
     let then = Rc::new(RefCell::new(then));
     move |event: E| {
-        let started: Result<Option<js_sys::Promise>> = if !event.as_ref().is_trusted() {
+        let started: Result<Option<(js_sys::Promise, PermissionSet)>> = if !event.as_ref().is_trusted() {
             Err(OxichromeError::InvalidArgument(
                 "only a real click or key press can ask for permissions; this event was created by code".to_string(),
             ))
@@ -413,13 +473,13 @@ where
                         return Ok(None);
                     }
                     let js = set_to_js(&part)?;
-                    js_bridge::permissions_request(&js).map(Some).map_err(browser_error)
+                    js_bridge::permissions_request(&js).map(|promise| Some((promise, part.clone()))).map_err(|error| set_error(&part, error))
                 })
         };
         let then = then.clone();
         wasm_bindgen_futures::spawn_local(async move {
             let result = match started {
-                Ok(Some(promise)) => settle(promise).await,
+                Ok(Some((promise, part))) => JsFuture::from(promise).await.map(|value| value.as_bool() == Some(true)).map_err(|error| set_error(&part, error)),
                 Ok(None) => Ok(true),
                 Err(err) => Err(err),
             };
@@ -434,17 +494,26 @@ pub async fn contains(set: impl Into<PermissionSet>) -> Result<bool> {
     let declared = Declared::read()?;
     let mut part = PermissionSet { permissions: Vec::new(), origins: set.origins.clone() };
     for permission in &set.permissions {
-        match declared.kind(*permission) {
-            Kind::Required => {}
-            Kind::Optional => part.permissions.push(*permission),
-            Kind::Missing => return Ok(false),
+        match (declared.kind(*permission), permission) {
+            (Kind::Required, Permission::Custom(_)) | (Kind::Optional, _) => part.permissions.push(*permission),
+            (Kind::Required, _) => {}
+            (Kind::Missing, _) => return Ok(false),
         }
     }
     if part.is_empty() {
         return Ok(true);
     }
     let js = set_to_js(&part)?;
-    settle(js_bridge::permissions_contains(&js).map_err(browser_error)?).await
+    let promise = match js_bridge::permissions_contains(&js) {
+        Ok(promise) => promise,
+        Err(error) if unrecognized(&error) => return Ok(false),
+        Err(error) => return Err(browser_error(error)),
+    };
+    match JsFuture::from(promise).await {
+        Ok(value) => Ok(value.as_bool() == Some(true)),
+        Err(error) if unrecognized(&error) => Ok(false),
+        Err(error) => Err(browser_error(error)),
+    }
 }
 
 pub async fn remove(set: impl Into<PermissionSet>) -> Result<bool> {
@@ -470,7 +539,8 @@ pub async fn remove(set: impl Into<PermissionSet>) -> Result<bool> {
         return Ok(false);
     }
     let js = set_to_js(&set)?;
-    settle(js_bridge::permissions_remove(&js).map_err(browser_error)?).await
+    let promise = js_bridge::permissions_remove(&js).map_err(|error| set_error(&set, error))?;
+    JsFuture::from(promise).await.map(|value| value.as_bool() == Some(true)).map_err(|error| set_error(&set, error))
 }
 
 pub async fn get_all() -> Result<PermissionSet> {
@@ -510,12 +580,17 @@ mod tests {
     }
 
     #[test]
-    fn sets_skip_unknown_names_and_extension_origins() {
+    fn sets_keep_custom_names_and_skip_internal_ones_and_extension_origins() {
         let set: PermissionSet = serde_json::from_str(
-            r#"{"permissions":["tabs","internal:svgContextPropertiesAllowed","menus","contextMenus"],"origins":["moz-extension://x/*","https://a.com/*"]}"#,
+            r#"{"permissions":["tabs","internal:svgContextPropertiesAllowed","menus","contextMenus","newThing","newThing"],"origins":["moz-extension://x/*","https://a.com/*"]}"#,
         )
         .unwrap();
-        assert_eq!(set.permissions, [Permission::ContextMenus, Permission::Tabs]);
+        assert_eq!(set.permissions, [Permission::ContextMenus, Permission::Tabs, Permission::Custom("newThing")]);
+        assert_eq!(PermissionSet::from([Permission::Custom("tabs"), Permission::Tabs]).permissions, [Permission::Tabs]);
+        assert_eq!(serde_json::to_string(&PermissionSet::from(Permission::Custom("newThing"))).unwrap(), r#"{"permissions":["newThing"],"origins":[]}"#);
+        assert!(!Permission::ALL.iter().any(|permission| matches!(permission, Permission::Custom(_))));
+        assert_eq!(Permission::custom(String::from("newThing")), Permission::Custom("newThing"));
+        assert_eq!(Permission::custom("tabs"), Permission::Tabs);
         assert_eq!(set.origins, ["https://a.com/*"]);
         let built = PermissionSet::from([Permission::History, Permission::History]).origin("https://a.com/*");
         assert_eq!(serde_json::to_string(&built).unwrap(), r#"{"permissions":["history"],"origins":["https://a.com/*"]}"#);

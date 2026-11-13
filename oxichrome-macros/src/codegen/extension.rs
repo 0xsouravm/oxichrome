@@ -209,9 +209,13 @@ pub fn expand(attr: TokenStream, item: TokenStream) -> Result<TokenStream, syn::
 
     let permission_checks = args.permissions.iter().chain(&args.optional_permissions).map(|declared| {
         let ident = &declared.ident;
+        let value = match &declared.custom {
+            Some(name) => quote! { oxichrome::Permission::#ident(#name) },
+            None => quote! { oxichrome::Permission::#ident },
+        };
         quote! {
             #[doc(hidden)]
-            const _: oxichrome::Permission = oxichrome::Permission::#ident;
+            const _: oxichrome::Permission = #value;
         }
     });
     let names = |list: &[crate::permission::Declared]| list.iter().map(|declared| declared.info.name).collect::<Vec<_>>();
@@ -284,6 +288,7 @@ pub fn expand(attr: TokenStream, item: TokenStream) -> Result<TokenStream, syn::
         "optional_host_permissions": args.optional_host_permissions.iter().map(LitStr::value).collect::<Vec<_>>(),
         "chrome_only": only(|info| info.firefox),
         "firefox_only": only(|info| info.chrome),
+        "custom_permissions": args.permissions.iter().chain(&args.optional_permissions).filter(|declared| declared.custom.is_some()).map(|declared| declared.info.name).collect::<Vec<_>>(),
         "icons": sizes(&args.icons)?,
         "action": action,
         "rule_sets": rule_sets.entries,
