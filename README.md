@@ -70,14 +70,35 @@ cd my-extension
 cargo oxichrome build
 ```
 
-`cargo oxichrome new` scaffolds a project with the `oxichrome` crate already in `[dependencies]`:
+`cargo oxichrome new` makes a small extension that works and looks finished: a popup with a click counter saved in extension storage, a settings page with one real setting, a background service worker that keeps the count on the toolbar button, icons, and a README that explains each file and points to the example for every API.
 
-```toml
-[dependencies]
-oxichrome = { version = "0.2" }
-wasm-bindgen = "0.2"
-serde = { version = "1", features = ["derive"] }
 ```
+my-extension/
+├── Cargo.toml          oxichrome, leptos, serde
+├── README.md
+├── .gitignore
+├── src/
+│   ├── lib.rs          #[extension] and the mod lines
+│   ├── background.rs   #[background] and an #[on(...)] handler
+│   ├── popup.rs        #[popup], a Leptos component
+│   └── options.rs      #[options_page]
+└── static/
+    ├── base.css
+    ├── style.css       your colors, light and dark
+    └── icons/
+```
+
+Flags add or remove pieces, each one a file of its own:
+
+| Flag | What it does |
+|---|---|
+| `--side-panel` | Adds `src/side_panel.rs` (the sidebar in Firefox) |
+| `--content-script` | Adds `src/content_script.rs`, which runs on example.com |
+| `--i18n` | Puts the text in `static/_locales/en/messages.json` and reads it with `t!()` |
+| `--no-popup`, `--no-options` | Leave out the popup or the settings page |
+| `--minimal` | Only `src/lib.rs` with `#[extension]` and `#[background]`, no UI and no Leptos |
+
+The argument can be a path (`cargo oxichrome new extensions/my-extension`); its last part becomes the crate name. `new` won't write into a folder that already has files in it.
 
 **Chrome/Edge:** Load `dist/chromium/` in `chrome://extensions` with "Load unpacked".
 
@@ -91,7 +112,7 @@ serde = { version = "1", features = ["derive"] }
 | `cargo oxichrome build --release` | Optimized release build |
 | `cargo oxichrome build --target firefox` | Build for Firefox |
 | `cargo oxichrome clean` | Remove the `dist/` directory |
-| `cargo oxichrome new <name>` | Scaffold a new extension project |
+| `cargo oxichrome new <path>` | Make a new extension project; see the flags above |
 
 ## Project structure
 

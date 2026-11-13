@@ -1,0 +1,43 @@
+use leptos::prelude::*;
+use leptos::task::spawn_local;
+use oxichrome::prelude::*;
+
+use crate::background::Settings;
+
+#[options_page(style = ["base.css", "style.css"])]
+fn Options() -> impl IntoView {
+    let settings = RwSignal::new(Settings::default());
+    spawn_local(async move { settings.set(Settings::load().await) });
+
+    let flip = move |_| {
+        settings.update(|s| s.show_badge = !s.show_badge);
+        spawn_local(settings.get_untracked().save());
+    };
+
+    view! {
+        <main class="page">
+            <header class="head">
+                <img class="mark" src="/icons/128.png" alt="" />
+                <div class="titles">
+                    <h1>{{tv:ext_name}}</h1>
+                    <p>{{tv:options_hint}}</p>
+                </div>
+            </header>
+            <section class="card">
+                <div class="setting">
+                    <div class="main">
+                        <div class="label">{{tv:badge_label}}</div>
+                        <div class="hint">{{tv:badge_hint}}</div>
+                    </div>
+                    <button
+                        class="switch"
+                        role="switch"
+                        aria-label={{tv:badge_label}}
+                        aria-checked=move || settings.with(|s| s.show_badge).to_string()
+                        on:click=flip
+                    ></button>
+                </div>
+            </section>
+        </main>
+    }
+}

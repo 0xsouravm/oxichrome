@@ -1,0 +1,19 @@
+use oxichrome::prelude::*;
+
+const PILL: &str = "{{name}}-hello";
+
+#[content_script(matches = ["*://example.com/*"], run_at = DocumentIdle, css = ["content.css"])]
+async fn hello() {
+    let Some(document) = web_sys::window().and_then(|window| window.document()) else {
+        return;
+    };
+    let (Some(body), Ok(pill)) = (document.body(), document.create_element("div")) else {
+        return;
+    };
+    if document.get_element_by_id(PILL).is_some() {
+        return;
+    }
+    pill.set_id(PILL);
+    pill.set_text_content(Some({{tr:content_hello}}));
+    let _ = body.append_child(&pill);
+}

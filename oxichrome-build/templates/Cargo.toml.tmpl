@@ -1,0 +1,23 @@
+[package]
+name = "{{name}}"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+oxichrome = "{{oxichrome}}"
+#if ui
+leptos = { version = "0.8", features = ["csr"] }
+#endif
+#if settings
+serde = { version = "1", features = ["derive"] }
+#endif
+#if content_script
+web-sys = { version = "0.3", features = ["Document", "Element", "Window"] }
+#endif
+
+[profile.release]
+opt-level = "s"
+lto = true

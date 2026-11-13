@@ -1,0 +1,46 @@
+#if background
+mod background;
+#endif
+#if content_script
+mod content_script;
+#endif
+#if options
+mod options;
+#endif
+#if popup
+mod popup;
+#endif
+#if side_panel
+mod side_panel;
+#endif
+#if modules
+
+#endif
+use oxichrome::prelude::*;
+
+#[extension(
+    name = {{t:ext_name}},
+    description = {{t:ext_desc}},
+    version = "0.1.0",
+#if i18n
+    default_locale = "en",
+#endif
+#if permissions
+    permissions = [{{permissions}}],
+#endif
+    icons = { 16 = "icons/16.png", 32 = "icons/32.png", 48 = "icons/48.png", 128 = "icons/128.png" },
+    action = { default_title = {{t:action_title}} }
+)]
+pub struct {{struct}};
+#if minimal
+
+#[background]
+async fn start() {
+    oxichrome::log!("{{display}} is running");
+}
+
+#[on(runtime::on_installed)]
+async fn installed() {
+    oxichrome::log!("{{display}} was installed or updated");
+}
+#endif

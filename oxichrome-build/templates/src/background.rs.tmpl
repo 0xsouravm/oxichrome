@@ -1,0 +1,61 @@
+use oxichrome::prelude::*;
+#if settings
+use oxichrome::{action, storage};
+use serde::{Deserialize, Serialize};
+
+const KEY: &str = "settings";
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Settings {
+    pub clicks: u32,
+    pub show_badge: bool,
+}
+
+impl Default for Settings {
+    fn default() -> Self {
+        Settings {
+            clicks: 0,
+            show_badge: true,
+        }
+    }
+}
+
+impl Settings {
+    pub async fn load() -> Self {
+        storage::get(KEY).await.ok().flatten().unwrap_or_default()
+    }
+
+    pub async fn save(self) {
+        if let Err(err) = storage::set(KEY, &self).await {
+            oxichrome::log!("couldn't save the settings: {err}");
+        }
+        self.show().await;
+    }
+
+    async fn show(self) {
+        let text = if self.show_badge && self.clicks > 0 {
+            self.clicks.to_string()
+        } else {
+            String::new()
+        };
+        let _ = action::set_badge_background_color("#c2410c", None).await;
+        let _ = action::set_badge_text(&text, None).await;
+    }
+}
+#endif
+
+#[background]
+async fn start() {
+#if settings
+    Settings::load().await.show().await;
+#endif
+#if !settings
+    oxichrome::log!("{{display}} is running");
+#endif
+}
+
+#[on(runtime::on_installed)]
+async fn installed() {
+    oxichrome::log!("{{display}} was installed or updated");
+}

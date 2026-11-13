@@ -1,0 +1,50 @@
+use leptos::prelude::*;
+use leptos::task::spawn_local;
+use oxichrome::prelude::*;
+
+use crate::background::Settings;
+
+#[popup(style = ["base.css", "style.css"])]
+fn Popup() -> impl IntoView {
+    let settings = RwSignal::new(Settings::default());
+    let loaded = RwSignal::new(false);
+    spawn_local(async move {
+        settings.set(Settings::load().await);
+        loaded.set(true);
+    });
+
+    let change = move |edit: fn(&mut Settings)| {
+        settings.update(edit);
+        spawn_local(settings.get_untracked().save());
+    };
+
+    view! {
+        <div class="popup">
+            <header class="head">
+                <img class="mark" src="/icons/48.png" alt="" />
+                <div class="titles">
+                    <h1>{{tv:ext_name}}</h1>
+                    <p>{{tv:popup_hint}}</p>
+                </div>
+#if options
+                <a class="icon-btn" href="/options.html" target="_blank" title={{tv:settings}} aria-label={{tv:settings}}>
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                        <circle cx="12" cy="12" r="3" />
+                        <path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z" />
+                    </svg>
+                </a>
+#endif
+            </header>
+            <div class="body">
+                <section class="card hello">
+                    <div class="count" aria-live="polite">{move || settings.with(|s| s.clicks)}</div>
+                    <div class="muted">{{tv:clicks_label}}</div>
+                    <div class="row-flex">
+                        <button class="btn primary lg" disabled=move || !loaded.get() on:click=move |_| change(|s| s.clicks += 1)>{{tv:click_me}}</button>
+                        <button class="btn lg" disabled=move || { settings.with(|s| s.clicks == 0) } on:click=move |_| change(|s| s.clicks = 0)>{{tv:reset}}</button>
+                    </div>
+                </section>
+            </div>
+        </div>
+    }
+}

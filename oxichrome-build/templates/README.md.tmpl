@@ -1,0 +1,66 @@
+# {{display}}
+
+A browser extension written in Rust with [oxichrome](https://oxichrome.dev). One codebase builds for Chrome and Firefox.
+
+## Build and load
+
+```sh
+cargo oxichrome build                    # writes dist/chromium
+cargo oxichrome build --target firefox   # writes dist/firefox
+```
+
+- **Chrome:** open `chrome://extensions`, turn on Developer mode, click **Load unpacked** and pick `dist/chromium`.
+- **Firefox:** open `about:debugging#/runtime/this-firefox`, click **Load Temporary Add-on** and pick `dist/firefox/manifest.json`.
+
+Build again after a change, then press the reload button on the extension's card.
+
+## What's here
+
+| File | What it does |
+|---|---|
+#if !minimal
+| `src/lib.rs` | `#[extension]`: the name, version, permissions, icons and toolbar button. The manifest is generated from it. |
+#endif
+#if background
+| `src/background.rs` | The background service worker: `#[background]` runs when it starts, `#[on(...)]` handles browser events.{{settings_note}} |
+#endif
+#if minimal
+| `src/lib.rs` | `#[extension]`: the name, version, icons and toolbar button, which the manifest is generated from. The background service worker lives here too: `#[background]` runs when it starts, `#[on(...)]` handles browser events. |
+#endif
+#if popup
+| `src/popup.rs` | `#[popup]`: what opens when you click the toolbar button, written as a [Leptos](https://leptos.dev) component. |
+#endif
+#if options
+| `src/options.rs` | `#[options_page]`: the settings page, opened from the gear in the popup or the browser's extensions page. |
+#endif
+#if side_panel
+| `src/side_panel.rs` | `#[side_panel]`: a panel that stays open next to the page (Firefox calls it the sidebar). |
+#endif
+#if content_script
+| `src/content_script.rs` | `#[content_script]`: runs inside matching pages. Open https://example.com to see it. |
+#endif
+#if ui
+| `static/` | Stylesheets and icons, copied into `dist/` as they are. `base.css` holds the shared look; change colors in `style.css`. |
+#endif
+#if !ui
+| `static/` | The icons and any other files the extension needs, copied into `dist/` as they are. |
+#endif
+#if i18n
+| `static/_locales/en/messages.json` | The extension's text. Add a folder like `_locales/de` with the same keys to translate it; `t!(key)` picks the right language. |
+#endif
+
+## Where to go next
+
+Every browser API oxichrome covers has a working example in [examples/](https://github.com/0xsouravm/oxichrome/tree/main/examples):
+
+| You want | Look at |
+|---|---|
+| Storage, the toolbar badge, a settings page | counter-extension |
+| Tabs, windows, a side panel, keyboard shortcuts, right-click menus, translations | tab-tidy |
+| Alarms, notifications, idle detection | focus-timer |
+| Content scripts, messages, offscreen documents, downloads, asking for permissions | page-lens |
+| Blocking requests, cookies, page loads | quiet-web |
+| The address bar, search, top sites, bookmarks, history | launchpad |
+| Calling a web API through wasm-bindgen | color-picker |
+
+The full API reference is at [oxichrome.dev](https://oxichrome.dev).

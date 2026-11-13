@@ -1,0 +1,39 @@
+:root {
+  --accent: #c2410c;
+  --accent-soft: #fdebe2;
+  --accent-ink: #ffffff;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --accent: #fb8c58;
+    --accent-soft: #3a1d10;
+    --accent-ink: #2a0e02;
+  }
+}
+
+.popup {
+  width: 300px;
+}
+
+.hello {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 22px 16px 18px;
+  text-align: center;
+}
+
+.hello .count {
+  font-size: 56px;
+  font-weight: 250;
+  letter-spacing: -0.04em;
+  line-height: 1.05;
+  font-variant-numeric: tabular-nums;
+}
+
+.hello .row-flex {
+  gap: 8px;
+  margin-top: 14px;
+}

@@ -1,0 +1,22 @@
+use leptos::prelude::*;
+use oxichrome::prelude::*;
+
+#[side_panel(title = {{t:panel_title}}, style = ["base.css", "style.css"])]
+fn Panel() -> impl IntoView {
+    view! {
+        <main class="panel">
+            <header class="head">
+                <img class="mark" src="/icons/48.png" alt="" />
+                <div class="titles">
+                    <h1>{{tv:panel_title}}</h1>
+                    <p>{{tv:panel_hint}}</p>
+                </div>
+            </header>
+            <div class="body">
+                <section class="card">
+                    <div class="empty">{{tv:panel_empty}}</div>
+                </section>
+            </div>
+        </main>
+    }
+}
