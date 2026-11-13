@@ -100,7 +100,7 @@ pub fn expand(attr: TokenStream, item: TokenStream, order: crate::codegen::Order
         #vis async fn #fn_name() #fn_body
 
         #[doc(hidden)]
-        #[oxichrome::__private::wasm_bindgen::prelude::wasm_bindgen]
+        #[oxichrome::__private::wasm_bindgen::prelude::wasm_bindgen(wasm_bindgen = oxichrome::__private::wasm_bindgen, wasm_bindgen_futures = oxichrome::__private::wasm_bindgen_futures)]
         pub fn #wrapper_name() {
             oxichrome::__private::wasm_bindgen_futures::spawn_local(async {
                 #fn_name().await;
@@ -228,9 +228,9 @@ fn on_demand(mut func: ItemFn, order: crate::codegen::Order) -> Result<TokenStre
         }
 
         #[doc(hidden)]
-        #[oxichrome::__private::wasm_bindgen::prelude::wasm_bindgen]
-        pub async fn #export(arg: #js) -> ::core::result::Result<#js, #js> {
-            oxichrome::scripting::__run_export::<#arg_ty, #ret_ty, _, _>(#name, arg, #call).await
+        #[oxichrome::__private::wasm_bindgen::prelude::wasm_bindgen(wasm_bindgen = oxichrome::__private::wasm_bindgen, wasm_bindgen_futures = oxichrome::__private::wasm_bindgen_futures)]
+        pub async fn #export(__oxichrome_arg: #js) -> ::core::result::Result<#js, #js> {
+            oxichrome::scripting::__run_export::<#arg_ty, #ret_ty, _, _>(#name, __oxichrome_arg, #call).await
         }
     })
 }

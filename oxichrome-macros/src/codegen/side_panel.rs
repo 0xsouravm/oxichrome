@@ -101,7 +101,7 @@ pub fn expand(attr: TokenStream, item: TokenStream, order: Order) -> Result<Toke
         #vis fn #fn_name() #ret #fn_body
 
         #[doc(hidden)]
-        #[oxichrome::__private::wasm_bindgen::prelude::wasm_bindgen(js_name = __oxichrome_mount_side_panel)]
+        #[oxichrome::__private::wasm_bindgen::prelude::wasm_bindgen(js_name = __oxichrome_mount_side_panel, wasm_bindgen = oxichrome::__private::wasm_bindgen, wasm_bindgen_futures = oxichrome::__private::wasm_bindgen_futures)]
         pub fn __oxichrome_only_one_side_panel_per_extension() {
             let handle = ::leptos::mount::mount_to_body(#fn_name);
             std::mem::forget(handle);

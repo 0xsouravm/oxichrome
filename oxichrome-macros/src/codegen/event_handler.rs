@@ -155,7 +155,7 @@ pub fn expand(attr: TokenStream, item: TokenStream, order: crate::codegen::Order
         );
 
         #[doc(hidden)]
-        #[oxichrome::__private::wasm_bindgen::prelude::wasm_bindgen]
+        #[oxichrome::__private::wasm_bindgen::prelude::wasm_bindgen(wasm_bindgen = oxichrome::__private::wasm_bindgen, wasm_bindgen_futures = oxichrome::__private::wasm_bindgen_futures)]
         pub fn #export_fn_name(#(#raw_args: #js_type),*) -> oxichrome::__private::js_sys::Promise {
             oxichrome::__private::wasm_bindgen_futures::future_to_promise(async move {
                 #(#conversions)*

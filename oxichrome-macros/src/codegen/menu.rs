@@ -147,14 +147,14 @@ pub fn expand_menu(attr: TokenStream, item: TokenStream, order: Order) -> syn::R
             };
             quote! {
                 #check
-                let click = <#ty as oxichrome::core::event::FromEventArg>::from_event_arg(click)
+                let __oxichrome_click = <#ty as oxichrome::core::event::FromEventArg>::from_event_arg(__oxichrome_click)
                     .map_err(|err| {
                         #js_type::from(oxichrome::__private::js_sys::Error::new(&format!(
                             "[oxichrome] {} argument 1 could not be read: {}",
                             #handler, err
                         )))
                     })?;
-                #fn_name(click).await;
+                #fn_name(__oxichrome_click).await;
             }
         }
     };
@@ -173,10 +173,10 @@ pub fn expand_menu(attr: TokenStream, item: TokenStream, order: Order) -> syn::R
         }
 
         #[doc(hidden)]
-        #[oxichrome::__private::wasm_bindgen::prelude::wasm_bindgen]
-        pub fn #export(click: #js_type) -> oxichrome::__private::js_sys::Promise {
+        #[oxichrome::__private::wasm_bindgen::prelude::wasm_bindgen(wasm_bindgen = oxichrome::__private::wasm_bindgen, wasm_bindgen_futures = oxichrome::__private::wasm_bindgen_futures)]
+        pub fn #export(__oxichrome_click: #js_type) -> oxichrome::__private::js_sys::Promise {
             oxichrome::__private::wasm_bindgen_futures::future_to_promise(async move {
-                let _ = &click;
+                let _ = &__oxichrome_click;
                 #call
                 Ok(#js_type::UNDEFINED)
             })

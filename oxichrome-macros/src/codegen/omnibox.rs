@@ -93,8 +93,8 @@ pub fn expand(attr: TokenStream, item: TokenStream) -> Result<TokenStream, syn::
     };
     let fn_name = &func.sig.ident;
     let name = fn_name.to_string();
-    let from_text = quote_spanned! {input_ty.span()=> <#input_ty as oxichrome::omnibox::__Input>::__from_text(input)};
-    let into_list = quote_spanned! {output_ty.span()=> <#output_ty as oxichrome::omnibox::__Output>::__into_list(result)};
+    let from_text = quote_spanned! {input_ty.span()=> <#input_ty as oxichrome::omnibox::__Input>::__from_text(__oxichrome_input)};
+    let into_list = quote_spanned! {output_ty.span()=> <#output_ty as oxichrome::omnibox::__Output>::__into_list(__oxichrome_result)};
     let entry = metadata::emit(serde_json::json!({
         "kind": "omnibox",
         "fn_name": name,
@@ -108,10 +108,10 @@ pub fn expand(attr: TokenStream, item: TokenStream) -> Result<TokenStream, syn::
         #func
 
         #[doc(hidden)]
-        #[oxichrome::__private::wasm_bindgen::prelude::wasm_bindgen(js_name = __oxichrome_omnibox_suggest)]
-        pub fn __oxichrome_only_one_omnibox_per_extension(input: String) -> oxichrome::__private::js_sys::Promise {
+        #[oxichrome::__private::wasm_bindgen::prelude::wasm_bindgen(js_name = __oxichrome_omnibox_suggest, wasm_bindgen = oxichrome::__private::wasm_bindgen, wasm_bindgen_futures = oxichrome::__private::wasm_bindgen_futures)]
+        pub fn __oxichrome_only_one_omnibox_per_extension(__oxichrome_input: String) -> oxichrome::__private::js_sys::Promise {
             oxichrome::__private::wasm_bindgen_futures::future_to_promise(async move {
-                let result = #fn_name(#from_text).await;
+                let __oxichrome_result = #fn_name(#from_text).await;
                 Ok(oxichrome::omnibox::__prepare(#name, #into_list))
             })
         }

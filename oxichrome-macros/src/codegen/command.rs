@@ -73,14 +73,14 @@ pub fn expand(attr: TokenStream, item: TokenStream, order: Order) -> syn::Result
             };
             quote! {
                 #check
-                let press = <#ty as oxichrome::core::event::FromEventArg>::from_event_arg(press)
+                let __oxichrome_press = <#ty as oxichrome::core::event::FromEventArg>::from_event_arg(__oxichrome_press)
                     .map_err(|err| {
                         #js_type::from(oxichrome::__private::js_sys::Error::new(&format!(
                             "[oxichrome] {} argument 1 could not be read: {}",
                             #name, err
                         )))
                     })?;
-                #fn_name(press).await;
+                #fn_name(__oxichrome_press).await;
             }
         }
     };
@@ -98,10 +98,10 @@ pub fn expand(attr: TokenStream, item: TokenStream, order: Order) -> syn::Result
         }
 
         #[doc(hidden)]
-        #[oxichrome::__private::wasm_bindgen::prelude::wasm_bindgen]
-        pub fn #export(press: #js_type) -> oxichrome::__private::js_sys::Promise {
+        #[oxichrome::__private::wasm_bindgen::prelude::wasm_bindgen(wasm_bindgen = oxichrome::__private::wasm_bindgen, wasm_bindgen_futures = oxichrome::__private::wasm_bindgen_futures)]
+        pub fn #export(__oxichrome_press: #js_type) -> oxichrome::__private::js_sys::Promise {
             oxichrome::__private::wasm_bindgen_futures::future_to_promise(async move {
-                let _ = &press;
+                let _ = &__oxichrome_press;
                 #call
                 Ok(#js_type::UNDEFINED)
             })

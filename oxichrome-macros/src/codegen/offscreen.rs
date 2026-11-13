@@ -208,9 +208,9 @@ pub fn expand(attr: TokenStream, item: TokenStream, order: crate::codegen::Order
         }
 
         #[doc(hidden)]
-        #[oxichrome::__private::wasm_bindgen::prelude::wasm_bindgen]
-        pub async fn #export(arg: #js) -> ::core::result::Result<#js, #js> {
-            oxichrome::scripting::__run_export::<#arg_ty, #ret_ty, _, _>(#name, arg, #call).await
+        #[oxichrome::__private::wasm_bindgen::prelude::wasm_bindgen(wasm_bindgen = oxichrome::__private::wasm_bindgen, wasm_bindgen_futures = oxichrome::__private::wasm_bindgen_futures)]
+        pub async fn #export(__oxichrome_arg: #js) -> ::core::result::Result<#js, #js> {
+            oxichrome::scripting::__run_export::<#arg_ty, #ret_ty, _, _>(#name, __oxichrome_arg, #call).await
         }
     })
 }

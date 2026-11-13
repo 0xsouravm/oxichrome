@@ -34,7 +34,7 @@ pub fn expand(item: TokenStream, order: crate::codegen::Order) -> Result<TokenSt
         #vis async fn #fn_name() #fn_body
 
         #[doc(hidden)]
-        #[oxichrome::__private::wasm_bindgen::prelude::wasm_bindgen]
+        #[oxichrome::__private::wasm_bindgen::prelude::wasm_bindgen(wasm_bindgen = oxichrome::__private::wasm_bindgen, wasm_bindgen_futures = oxichrome::__private::wasm_bindgen_futures)]
         pub fn #wrapper_name() {
             oxichrome::__private::wasm_bindgen_futures::spawn_local(async {
                 #fn_name().await;
