@@ -1484,3 +1484,20 @@ extern "C" {
     #[wasm_bindgen(catch)]
     pub fn top_sites_get() -> Result<js_sys::Promise, JsValue>;
 }
+
+#[wasm_bindgen(inline_js = r#"
+export function management_get_self() {
+    return chrome.management.getSelf();
+}
+
+export function management_uninstall_self(confirm) {
+    return chrome.management.uninstallSelf({ showConfirmDialog: confirm });
+}
+"#)]
+extern "C" {
+    #[wasm_bindgen(catch)]
+    pub fn management_get_self() -> Result<js_sys::Promise, JsValue>;
+
+    #[wasm_bindgen(catch)]
+    pub fn management_uninstall_self(confirm: bool) -> Result<js_sys::Promise, JsValue>;
+}

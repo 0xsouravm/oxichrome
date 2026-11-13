@@ -13,6 +13,7 @@ pub mod history;
 pub mod i18n;
 pub mod idle;
 pub mod js_bridge;
+pub mod management;
 mod json;
 pub mod notifications;
 pub mod offscreen;

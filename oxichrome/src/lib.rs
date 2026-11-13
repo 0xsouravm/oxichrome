@@ -15,6 +15,7 @@ pub use oxichrome_core::event;
 pub use oxichrome_core::history;
 pub use oxichrome_core::i18n;
 pub use oxichrome_core::idle;
+pub use oxichrome_core::management;
 pub use oxichrome_core::downloads;
 pub use oxichrome_core::notifications;
 pub use oxichrome_core::offscreen;

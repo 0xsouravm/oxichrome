@@ -749,6 +749,12 @@ let visits = history::visits("https://www.rust-lang.org/").await?;      // oldes
 history::delete("https://www.rust-lang.org/").await?;
 history::delete_range(week_ago, js_sys::Date::now()).await?;             // both ends included; also delete_all
 
+// This extension's own details and uninstalling it (no permission needed)
+use oxichrome::management::{self, InstallType};
+let me = management::get_self().await?;                                 // id, name, version, install_type, permissions, ...
+let unpacked = me.install_type == InstallType::Development;
+management::uninstall_self().await?;                                     // right away, without asking; nothing after this runs
+
 // Most visited sites (requires the "topSites" permission)
 let sites = oxichrome::top_sites::get().await?;                         // Vec<Site>, each with url and title
 
@@ -947,6 +953,21 @@ async fn removed(removed: Removed) {} // Removed::All, or Removed::Urls(urls) wi
 ```
 
 `on_title_changed` exists only in Firefox, so oxichrome leaves it out. Listening to a `history` event without `History` in `permissions` is a build error.
+
+`management::get_self` reads the same in both browsers: `id`, `name`, `description`, `version`, `enabled`, `may_disable`, `install_type` (`Development` for an unpacked or temporary extension), `options_url` (`None` without an options page), the granted `permissions` and `host_permissions` (Firefox's own `moz-extension://` origin is left out). To ask the user first, use `uninstall_on_click`, the same way as `request_on_click`: Chrome only shows the dialog during a click, and a click made by code is refused in both. The callback runs only if the extension is still there, with `Ok(false)` when the user cancels:
+
+```rust
+use oxichrome::management;
+
+#[oxichrome::options_page]
+fn Options() -> impl IntoView {
+    view! {
+        <button on:click=management::uninstall_on_click(|kept| async move {
+            oxichrome::log!("still installed: {kept:?}");
+        })>"Uninstall"</button>
+    }
+}
+```
 
 `top_sites::get` lists the user's most visited sites, one page per site in both browsers, most visited first. Each browser picks which page stands for a site and how many to list, and a new profile can start with the browser's own suggestions (Chrome lists its Web Store). Search shortcuts and duplicates are left out, and a page without a title has an empty `title`.
 
