@@ -1,0 +1,131 @@
+{
+  "app_name": {
+    "message": "Tab Tidy"
+  },
+  "app_desc": {
+    "message": "Find, switch, pin, mute and close tabs across every window, and clear out duplicate tabs in one go."
+  },
+  "action_title": {
+    "message": "Tab Tidy"
+  },
+  "panel_title": {
+    "message": "Tab Tidy"
+  },
+  "tab_one": {
+    "message": "1 tab"
+  },
+  "tab_many": {
+    "message": "$1 tabs"
+  },
+  "window_one": {
+    "message": "1 window"
+  },
+  "window_many": {
+    "message": "$1 windows"
+  },
+  "summary": {
+    "message": "$1 across $2"
+  },
+  "search_placeholder": {
+    "message": "Search tabs by title or address"
+  },
+  "dupes_one": {
+    "message": "1 duplicate tab"
+  },
+  "dupes_many": {
+    "message": "$1 duplicate tabs"
+  },
+  "dupes_hint": {
+    "message": "The same page is open more than once. Pinned and active tabs stay."
+  },
+  "close_dupes": {
+    "message": "Close"
+  },
+  "duplicate": {
+    "message": "Duplicate"
+  },
+  "pinned": {
+    "message": "Pinned"
+  },
+  "this_window": {
+    "message": "This window"
+  },
+  "other_window": {
+    "message": "Window $1"
+  },
+  "focus_window": {
+    "message": "Switch to this window"
+  },
+  "new_window": {
+    "message": "New window"
+  },
+  "pin": {
+    "message": "Pin tab"
+  },
+  "unpin": {
+    "message": "Unpin tab"
+  },
+  "mute": {
+    "message": "Mute tab"
+  },
+  "unmute": {
+    "message": "Unmute tab"
+  },
+  "move_window": {
+    "message": "Move to a new window"
+  },
+  "close_tab": {
+    "message": "Close tab"
+  },
+  "no_match_title": {
+    "message": "No tabs match"
+  },
+  "no_match_body": {
+    "message": "Try part of a title or a site name."
+  },
+  "closed_so_far": {
+    "message": "$1 closed so far"
+  },
+  "shortcut_label": {
+    "message": "closes duplicates"
+  },
+  "shortcut_none": {
+    "message": "No shortcut for closing duplicates"
+  },
+  "change_shortcut": {
+    "message": "Change"
+  },
+  "open_panel": {
+    "message": "Open in the side panel"
+  },
+  "toast_closed_one": {
+    "message": "Closed 1 duplicate"
+  },
+  "toast_closed_many": {
+    "message": "Closed $1 duplicates"
+  },
+  "toast_moved": {
+    "message": "Moved to a new window"
+  },
+  "toast_none": {
+    "message": "No duplicates to close"
+  },
+  "cmd_dupes": {
+    "message": "Close duplicate tabs"
+  },
+  "cmd_move": {
+    "message": "Move the current tab to a new window"
+  },
+  "menu_dupes": {
+    "message": "Close duplicate tabs"
+  },
+  "menu_move": {
+    "message": "Move tab to a new window"
+  },
+  "menu_pin": {
+    "message": "Pin or unpin this tab"
+  },
+  "menu_close_site": {
+    "message": "Close other tabs from this site"
+  }
+}

@@ -1,0 +1,131 @@
+{
+  "app_name": {
+    "message": "Tab Tidy"
+  },
+  "app_desc": {
+    "message": "Tabs in allen Fenstern finden, wechseln, anheften, stummschalten und schließen, und doppelte Tabs auf einmal aufräumen."
+  },
+  "action_title": {
+    "message": "Tab Tidy"
+  },
+  "panel_title": {
+    "message": "Tab Tidy"
+  },
+  "tab_one": {
+    "message": "1 Tab"
+  },
+  "tab_many": {
+    "message": "$1 Tabs"
+  },
+  "window_one": {
+    "message": "1 Fenster"
+  },
+  "window_many": {
+    "message": "$1 Fenstern"
+  },
+  "summary": {
+    "message": "$1 in $2"
+  },
+  "search_placeholder": {
+    "message": "Tabs nach Titel oder Adresse suchen"
+  },
+  "dupes_one": {
+    "message": "1 doppelter Tab"
+  },
+  "dupes_many": {
+    "message": "$1 doppelte Tabs"
+  },
+  "dupes_hint": {
+    "message": "Dieselbe Seite ist mehrfach offen. Angeheftete und aktive Tabs bleiben."
+  },
+  "close_dupes": {
+    "message": "Schließen"
+  },
+  "duplicate": {
+    "message": "Doppelt"
+  },
+  "pinned": {
+    "message": "Angeheftet"
+  },
+  "this_window": {
+    "message": "Dieses Fenster"
+  },
+  "other_window": {
+    "message": "Fenster $1"
+  },
+  "focus_window": {
+    "message": "Zu diesem Fenster wechseln"
+  },
+  "new_window": {
+    "message": "Neues Fenster"
+  },
+  "pin": {
+    "message": "Tab anheften"
+  },
+  "unpin": {
+    "message": "Tab lösen"
+  },
+  "mute": {
+    "message": "Tab stummschalten"
+  },
+  "unmute": {
+    "message": "Ton einschalten"
+  },
+  "move_window": {
+    "message": "In neues Fenster verschieben"
+  },
+  "close_tab": {
+    "message": "Tab schließen"
+  },
+  "no_match_title": {
+    "message": "Keine passenden Tabs"
+  },
+  "no_match_body": {
+    "message": "Versuche einen Teil des Titels oder einen Seitennamen."
+  },
+  "closed_so_far": {
+    "message": "$1 bisher geschlossen"
+  },
+  "shortcut_label": {
+    "message": "schließt Duplikate"
+  },
+  "shortcut_none": {
+    "message": "Kein Kürzel zum Schließen von Duplikaten"
+  },
+  "change_shortcut": {
+    "message": "Ändern"
+  },
+  "open_panel": {
+    "message": "In der Seitenleiste öffnen"
+  },
+  "toast_closed_one": {
+    "message": "1 Duplikat geschlossen"
+  },
+  "toast_closed_many": {
+    "message": "$1 Duplikate geschlossen"
+  },
+  "toast_moved": {
+    "message": "In ein neues Fenster verschoben"
+  },
+  "toast_none": {
+    "message": "Keine Duplikate zum Schließen"
+  },
+  "cmd_dupes": {
+    "message": "Doppelte Tabs schließen"
+  },
+  "cmd_move": {
+    "message": "Aktuellen Tab in ein neues Fenster verschieben"
+  },
+  "menu_dupes": {
+    "message": "Doppelte Tabs schließen"
+  },
+  "menu_move": {
+    "message": "Tab in neues Fenster verschieben"
+  },
+  "menu_pin": {
+    "message": "Tab anheften oder lösen"
+  },
+  "menu_close_site": {
+    "message": "Andere Tabs dieser Seite schließen"
+  }
+}

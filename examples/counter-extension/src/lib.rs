@@ -1,146 +1,147 @@
 use leptos::prelude::*;
+use leptos::task::spawn_local;
 use oxichrome::prelude::*;
+use oxichrome::{action, storage};
+use serde::{Deserialize, Serialize};
 
-#[oxichrome::extension(
-    name = "Counter Extension",
-    version = "0.1.0",
-    description = "A simple counter stored in chrome.storage.local",
-    permissions = [Storage]
+#[extension(
+    name = "Counter",
+    description = "The smallest oxichrome extension: a number you can change from the popup, kept in storage and shown on the toolbar.",
+    version = "0.3.0",
+    permissions = [Storage],
+    icons = { 16 = "icons/16.png", 32 = "icons/32.png", 48 = "icons/48.png", 128 = "icons/128.png" },
+    action = { default_title = "Counter" },
+    gecko_id = "counter@oxichrome.dev"
 )]
-struct CounterExtension;
+pub struct Counter;
 
-#[oxichrome::background]
+const KEY: &str = "counter";
+const STEPS: [i64; 3] = [1, 5, 10];
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Count {
+    pub value: i64,
+    pub step: i64,
+    pub badge: bool,
+}
+
+impl Default for Count {
+    fn default() -> Self {
+        Count { value: 0, step: 1, badge: true }
+    }
+}
+
+async fn load() -> Count {
+    storage::get(KEY).await.ok().flatten().unwrap_or_default()
+}
+
+async fn save(count: Count) {
+    let _ = storage::set(KEY, &count).await;
+    let text = if count.badge { short(count.value) } else { String::new() };
+    let _ = action::set_badge_background_color("#0a7fbd", None).await;
+    let _ = action::set_badge_text(&text, None).await;
+}
+
+fn short(value: i64) -> String {
+    match value.abs() {
+        0..=9_999 => value.to_string(),
+        10_000..=999_999 => format!("{}k", value / 1_000),
+        _ => format!("{}m", value / 1_000_000),
+    }
+}
+
+#[background]
 async fn start() {
-    oxichrome::log!("Counter Extension background service worker started!");
+    save(load().await).await;
 }
 
-#[oxichrome::on(runtime::on_installed)]
-async fn handle_install(details: oxichrome::__private::wasm_bindgen::JsValue) {
-    oxichrome::log!("Counter Extension installed: {:?}", details);
-
-    if let Err(e) = oxichrome::storage::set("counter", &0i32).await {
-        oxichrome::log!("Failed to initialize counter: {}", e);
-    } else {
-        oxichrome::log!("Counter initialized to 0.");
-    }
+fn use_count() -> RwSignal<Count> {
+    let count = RwSignal::new(Count::default());
+    spawn_local(async move { count.set(load().await) });
+    count
 }
 
-#[oxichrome::popup]
+fn change(count: RwSignal<Count>, edit: impl FnOnce(&mut Count)) {
+    count.update(edit);
+    let next = count.get_untracked();
+    spawn_local(save(next));
+}
+
+#[popup(style = ["base.css", "counter.css"])]
 fn Popup() -> impl IntoView {
-    let count = RwSignal::new(0i32);
-
-    Effect::new(move || {
-        wasm_bindgen_futures::spawn_local(async move {
-            if let Ok(Some(val)) = oxichrome::storage::get::<i32>("counter").await {
-                count.set(val);
-            }
-        });
-    });
-
-    let update = move |delta: i32| {
-        count.update(|c| *c += delta);
-        let val = count.get_untracked();
-        wasm_bindgen_futures::spawn_local(async move {
-            let _ = oxichrome::storage::set("counter", &val).await;
-        });
-    };
-
-    let increment = move |_| update(1);
-    let decrement = move |_| update(-1);
-    let reset = move |_| {
-        count.set(0);
-        wasm_bindgen_futures::spawn_local(async move {
-            let _ = oxichrome::storage::set("counter", &0i32).await;
-        });
-    };
-
+    let count = use_count();
     view! {
-        <style>
-            "* { margin: 0; padding: 0; box-sizing: border-box; }
-            body { width: 240px; font-family: -apple-system, BlinkMacSystemFont, sans-serif;
-                   background: #0f0f0f; color: #e0e0e0; padding: 1.25rem; }
-            h1 { font-size: 0.65rem; font-weight: 500; letter-spacing: 0.15em;
-                 text-transform: uppercase; color: #888; margin-bottom: 1rem; text-align: center; }
-            .count { font-size: 3.5rem; font-weight: 200; font-variant-numeric: tabular-nums;
-                     line-height: 1; text-align: center; color: #fff; margin-bottom: 1.25rem; }
-            .controls { display: flex; gap: 0.5rem; justify-content: center; }
-            button { width: 44px; height: 44px; border-radius: 50%; border: 1.5px solid #333;
-                     background: transparent; color: #e0e0e0; font-size: 1.25rem; cursor: pointer;
-                     transition: all 0.15s ease; display: flex; align-items: center;
-                     justify-content: center; }
-            button:hover { border-color: #e0e0e0; color: #fff; }
-            button:active { background: #e0e0e0; color: #0f0f0f; }
-            .reset { width: auto; border-radius: 22px; padding: 0 1rem; font-size: 0.7rem;
-                     letter-spacing: 0.08em; text-transform: uppercase; }"
-        </style>
-        <h1>"Counter"</h1>
-        <div class="count">{move || count.get()}</div>
-        <div class="controls">
-            <button on:click=decrement>"\u{2212}"</button>
-            <button on:click=increment>"+"</button>
-            <button class="reset" on:click=reset>"Reset"</button>
-        </div>
-    }
-}
-
-#[oxichrome::options_page]
-fn Options() -> impl IntoView {
-    let count = RwSignal::new(0i32);
-
-    Effect::new(move || {
-        wasm_bindgen_futures::spawn_local(async move {
-            if let Ok(Some(val)) = oxichrome::storage::get::<i32>("counter").await {
-                count.set(val);
-            }
-        });
-    });
-
-    let update = move |delta: i32| {
-        count.update(|c| *c += delta);
-        let val = count.get_untracked();
-        wasm_bindgen_futures::spawn_local(async move {
-            let _ = oxichrome::storage::set("counter", &val).await;
-        });
-    };
-
-    let increment = move |_| update(1);
-    let decrement = move |_| update(-1);
-    let reset = move |_| {
-        count.set(0);
-        wasm_bindgen_futures::spawn_local(async move {
-            let _ = oxichrome::storage::set("counter", &0i32).await;
-        });
-    };
-
-    view! {
-        <style>
-            "* { margin: 0; padding: 0; box-sizing: border-box; }
-            body { font-family: -apple-system, BlinkMacSystemFont, sans-serif;
-                   background: #0f0f0f; color: #e0e0e0; display: flex;
-                   justify-content: center; align-items: center; min-height: 100vh; }
-            .container { text-align: center; padding: 3rem; }
-            h1 { font-size: 1rem; font-weight: 500; letter-spacing: 0.15em;
-                 text-transform: uppercase; color: #888; margin-bottom: 2rem; }
-            .count { font-size: 8rem; font-weight: 200; font-variant-numeric: tabular-nums;
-                     line-height: 1; margin-bottom: 2.5rem; color: #fff; }
-            .controls { display: flex; gap: 1rem; justify-content: center; }
-            button { width: 56px; height: 56px; border-radius: 50%; border: 1.5px solid #333;
-                     background: transparent; color: #e0e0e0; font-size: 1.5rem; cursor: pointer;
-                     transition: all 0.15s ease; display: flex; align-items: center;
-                     justify-content: center; }
-            button:hover { border-color: #e0e0e0; color: #fff; }
-            button:active { background: #e0e0e0; color: #0f0f0f; }
-            .reset { width: auto; border-radius: 28px; padding: 0 1.5rem; font-size: 0.8rem;
-                     letter-spacing: 0.08em; text-transform: uppercase; }"
-        </style>
-        <div class="container">
-            <h1>"Counter Extension"</h1>
-            <div class="count">{move || count.get()}</div>
+        <div class="popup counter">
+            <header class="head">
+                <img class="mark" src="/icons/48.png" alt="" />
+                <div class="titles"><h1>"Counter"</h1><p>"Saved in extension storage"</p></div>
+            </header>
+            <div class="value" aria-live="polite">{move || count.with(|c| c.value)}</div>
             <div class="controls">
-                <button on:click=decrement>"\u{2212}"</button>
-                <button on:click=increment>"+"</button>
-                <button class="reset" on:click=reset>"Reset"</button>
+                <button class="round" aria-label="Decrease" on:click=move |_| change(count, |c| c.value -= c.step)>"−"</button>
+                <button class="round primary" aria-label="Increase" on:click=move |_| change(count, |c| c.value += c.step)>"+"</button>
+            </div>
+            <div class="foot">
+                <span>{move || format!("Steps of {}", count.with(|c| c.step))}</span>
+                <button class="btn ghost" disabled=move || { count.with(|c| c.value == 0) } on:click=move |_| change(count, |c| c.value = 0)>"Reset"</button>
             </div>
         </div>
+    }
+}
+
+#[options_page(style = ["base.css", "counter.css"])]
+fn Options() -> impl IntoView {
+    let count = use_count();
+    view! {
+        <main class="page">
+            <header class="head">
+                <img class="mark" src="/icons/128.png" alt="" />
+                <div class="titles">
+                    <h1>"Counter"</h1>
+                    <p>"Changes here are saved right away and the popup picks them up the next time it opens."</p>
+                </div>
+            </header>
+            <section class="card">
+                <div class="setting">
+                    <div class="main"><div class="label">"Step"</div><div class="hint">"How much + and − change the number."</div></div>
+                    <div class="segmented" role="group" aria-label="Step">
+                        {STEPS.into_iter().map(|step| view! {
+                            <button
+                                aria-pressed=move || count.with(|c| c.step == step).to_string()
+                                on:click=move |_| change(count, |c| c.step = step)
+                            >{step}</button>
+                        }).collect_view()}
+                    </div>
+                </div>
+                <div class="setting">
+                    <div class="main"><div class="label">"Show on the toolbar"</div><div class="hint">"Puts the number on the extension's button."</div></div>
+                    <button
+                        class="switch"
+                        role="switch"
+                        aria-label="Show on the toolbar"
+                        aria-checked=move || count.with(|c| c.badge).to_string()
+                        on:click=move |_| change(count, |c| c.badge = !c.badge)
+                    ></button>
+                </div>
+                <div class="setting">
+                    <div class="main"><div class="label">"Current value"</div><div class="hint mono">{move || count.with(|c| c.value)}</div></div>
+                    <button class="btn danger" on:click=move |_| change(count, |c| c.value = 0)>"Reset"</button>
+                </div>
+            </section>
+        </main>
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn badge_text_fits() {
+        assert_eq!(short(42), "42");
+        assert_eq!(short(-9_999), "-9999");
+        assert_eq!(short(12_345), "12k");
+        assert_eq!(short(-3_400_000), "-3m");
     }
 }

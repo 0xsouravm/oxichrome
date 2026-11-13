@@ -1,0 +1,51 @@
+[
+ {
+  "id": 1,
+  "action": {
+   "type": "block"
+  },
+  "condition": {
+   "requestDomains": [
+    "cdn.cookielaw.org",
+    "cookie-cdn.cookiepro.com",
+    "consent.cookiebot.com",
+    "consentcdn.cookiebot.com",
+    "cdn.privacy-mgmt.com",
+    "quantcast.mgr.consensu.org",
+    "app.termly.io",
+    "cmp.osano.com"
+   ],
+   "resourceTypes": [
+    "script",
+    "sub_frame",
+    "stylesheet",
+    "xmlhttprequest"
+   ]
+  }
+ },
+ {
+  "id": 2,
+  "action": {
+   "type": "block"
+  },
+  "condition": {
+   "requestDomains": [
+    "widget.intercom.io",
+    "js.intercomcdn.com",
+    "js.driftt.com",
+    "embed.tawk.to",
+    "client.crisp.chat",
+    "static.zdassets.com",
+    "wchat.freshchat.com",
+    "js.hs-scripts.com"
+   ],
+   "resourceTypes": [
+    "script",
+    "sub_frame",
+    "stylesheet",
+    "xmlhttprequest",
+    "websocket"
+   ]
+  }
+ }
+]

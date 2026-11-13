@@ -1,0 +1,125 @@
+[
+ {
+  "id": 1,
+  "action": {
+   "type": "block"
+  },
+  "condition": {
+   "requestDomains": [
+    "doubleclick.net",
+    "googlesyndication.com",
+    "googleadservices.com",
+    "adservice.google.com",
+    "amazon-adsystem.com",
+    "adnxs.com",
+    "criteo.com",
+    "criteo.net",
+    "taboola.com",
+    "outbrain.com",
+    "rubiconproject.com",
+    "pubmatic.com",
+    "openx.net"
+   ],
+   "resourceTypes": [
+    "script",
+    "image",
+    "xmlhttprequest",
+    "sub_frame",
+    "ping",
+    "media",
+    "font",
+    "stylesheet",
+    "websocket",
+    "other"
+   ]
+  }
+ },
+ {
+  "id": 2,
+  "action": {
+   "type": "block"
+  },
+  "condition": {
+   "requestDomains": [
+    "google-analytics.com",
+    "googletagmanager.com",
+    "analytics.google.com",
+    "scorecardresearch.com",
+    "quantserve.com",
+    "chartbeat.com",
+    "mixpanel.com",
+    "segment.io",
+    "cdn.segment.com",
+    "amplitude.com",
+    "heap.io",
+    "hotjar.com",
+    "fullstory.com",
+    "clarity.ms",
+    "mouseflow.com",
+    "newrelic.com",
+    "nr-data.net"
+   ],
+   "resourceTypes": [
+    "script",
+    "image",
+    "xmlhttprequest",
+    "sub_frame",
+    "ping",
+    "media",
+    "font",
+    "stylesheet",
+    "websocket",
+    "other"
+   ]
+  }
+ },
+ {
+  "id": 3,
+  "action": {
+   "type": "block"
+  },
+  "condition": {
+   "requestDomains": [
+    "connect.facebook.net",
+    "pixel.facebook.com",
+    "analytics.tiktok.com",
+    "ads.linkedin.com",
+    "px.ads.linkedin.com",
+    "bat.bing.com",
+    "ct.pinterest.com",
+    "analytics.twitter.com",
+    "static.ads-twitter.com"
+   ],
+   "resourceTypes": [
+    "script",
+    "image",
+    "xmlhttprequest",
+    "sub_frame",
+    "ping",
+    "media",
+    "font",
+    "stylesheet",
+    "websocket",
+    "other"
+   ]
+  }
+ },
+ {
+  "id": 4,
+  "action": {
+   "type": "block"
+  },
+  "condition": {
+   "urlFilter": "/collect?",
+   "requestDomains": [
+    "google-analytics.com",
+    "analytics.google.com"
+   ],
+   "resourceTypes": [
+    "xmlhttprequest",
+    "ping",
+    "image"
+   ]
+  }
+ }
+]

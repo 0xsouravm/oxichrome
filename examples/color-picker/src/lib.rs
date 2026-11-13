@@ -1,195 +1,190 @@
+mod color;
+
+use std::result::Result as StdResult;
+use std::time::Duration;
+
 use leptos::prelude::*;
+use leptos::task::spawn_local;
 use oxichrome::prelude::*;
+use oxichrome::storage;
 use wasm_bindgen::prelude::*;
+use wasm_bindgen_futures::JsFuture;
 
-#[oxichrome::extension(
+use color::Color;
+
+#[extension(
     name = "Color Picker",
-    version = "0.1.0",
-    description = "Pick colors from anywhere on screen using the EyeDropper API",
-    permissions = [Storage]
+    description = "Pick a color from anywhere on screen, copy it as HEX, RGB or HSL, and keep the last few in a palette that follows you between computers.",
+    version = "0.3.0",
+    permissions = [Storage, ClipboardWrite],
+    icons = { 16 = "icons/16.png", 32 = "icons/32.png", 48 = "icons/48.png", 128 = "icons/128.png" },
+    action = { default_title = "Pick a color", shortcut = "Alt+Shift+C" },
+    gecko_id = "color-picker@oxichrome.dev"
 )]
-struct ColorPickerExtension;
+pub struct ColorPicker;
 
-// EyeDropper Web API bindings (Chrome 95+)
+const HISTORY: &str = "history";
+const KEEP: usize = 15;
 
 #[wasm_bindgen]
 extern "C" {
     type EyeDropper;
 
-    #[wasm_bindgen(constructor)]
-    fn new() -> EyeDropper;
+    #[wasm_bindgen(constructor, catch)]
+    fn new() -> StdResult<EyeDropper, JsValue>;
 
     #[wasm_bindgen(method)]
     fn open(this: &EyeDropper) -> js_sys::Promise;
-
-    #[wasm_bindgen(js_namespace = ["navigator", "clipboard"], js_name = "writeText")]
-    fn clipboard_write_text(text: &str) -> js_sys::Promise;
 }
 
-#[oxichrome::background]
-async fn start() {
-    oxichrome::log!("Color Picker background service worker started!");
+fn has_eyedropper() -> bool {
+    js_sys::Reflect::has(&js_sys::global(), &JsValue::from_str("EyeDropper")).unwrap_or(false)
 }
 
-const MAX_HISTORY: usize = 20;
-const STORAGE_KEY: &str = "color_history";
+async fn eyedropper() -> Option<Color> {
+    let dropper = EyeDropper::new().ok()?;
+    let picked = JsFuture::from(dropper.open()).await.ok()?;
+    let hex = js_sys::Reflect::get(&picked, &JsValue::from_str("sRGBHex")).ok()?.as_string()?;
+    Color::parse(&hex)
+}
 
-#[oxichrome::popup]
+async fn copy(text: &str) -> bool {
+    let Some(window) = web_sys::window() else { return false };
+    JsFuture::from(window.navigator().clipboard().write_text(text)).await.is_ok()
+}
+
+#[popup(style = ["base.css", "color-picker.css"])]
 fn Popup() -> impl IntoView {
-    let current_color = RwSignal::new(String::from("#000000"));
+    let current = RwSignal::new(Color::parse("#6e56cf").unwrap_or_default());
     let history = RwSignal::new(Vec::<String>::new());
     let picking = RwSignal::new(false);
-    let error_msg = RwSignal::new(Option::<String>::None);
-    let copied = RwSignal::new(false);
+    let copied = RwSignal::new(None::<&'static str>);
+    let note = RwSignal::new(None::<String>);
+    let can_pick = has_eyedropper();
 
-    Effect::new(move || {
-        wasm_bindgen_futures::spawn_local(async move {
-            if let Ok(Some(colors)) =
-                oxichrome::storage::get::<Vec<String>>(STORAGE_KEY).await
-            {
-                if let Some(first) = colors.first() {
-                    current_color.set(first.clone());
-                }
-                history.set(colors);
-            }
-        });
+    spawn_local(async move {
+        let saved: Vec<String> = storage::sync::get(HISTORY).await.ok().flatten().unwrap_or_default();
+        if let Some(first) = saved.first().and_then(|hex| Color::parse(hex)) {
+            current.set(first);
+        }
+        history.set(saved);
     });
 
-    let pick_color = move |_| {
+    let remember = move |color: Color| {
+        current.set(color);
+        history.update(|list| {
+            let hex = color.hex();
+            list.retain(|old| *old != hex);
+            list.insert(0, hex);
+            list.truncate(KEEP);
+        });
+        let list = history.get_untracked();
+        spawn_local(async move {
+            if let Err(err) = storage::sync::set(HISTORY, &list).await {
+                note.set(Some(err.to_string()));
+            }
+        });
+    };
+    let pick = move |_| {
         picking.set(true);
-        error_msg.set(None);
-        wasm_bindgen_futures::spawn_local(async move {
-            let dropper = EyeDropper::new();
-            match wasm_bindgen_futures::JsFuture::from(dropper.open()).await {
-                Ok(result) => {
-                    let hex = js_sys::Reflect::get(&result, &JsValue::from_str("sRGBHex"))
-                        .unwrap_or(JsValue::from_str("#000000"))
-                        .as_string()
-                        .unwrap_or_else(|| "#000000".into());
-
-                    current_color.set(hex.clone());
-
-                    history.update(|h| {
-                        h.retain(|c| c != &hex);
-                        h.insert(0, hex);
-                        h.truncate(MAX_HISTORY);
-                    });
-
-                    let colors = history.get_untracked();
-                    let _ = oxichrome::storage::set(STORAGE_KEY, &colors).await;
-                }
-                Err(_) => {
-                    error_msg.set(Some("Cancelled or EyeDropper unavailable".into()));
-                }
+        note.set(None);
+        spawn_local(async move {
+            match eyedropper().await {
+                Some(color) => remember(color),
+                None => note.set(Some("Nothing picked. Press Esc to cancel, or click anywhere on screen to pick.".into())),
             }
             picking.set(false);
         });
     };
-
-    let copy_hex = move |_| {
-        let hex = current_color.get_untracked();
-        wasm_bindgen_futures::spawn_local(async move {
-            let _ = wasm_bindgen_futures::JsFuture::from(clipboard_write_text(&hex)).await;
-            copied.set(true);
-            let cb = Closure::once(move || copied.set(false));
-            let global = js_sys::global();
-            let set_timeout = js_sys::Reflect::get(&global, &JsValue::from_str("setTimeout"))
-                .unwrap()
-                .unchecked_into::<js_sys::Function>();
-            let _ = set_timeout.call2(
-                &JsValue::NULL,
-                cb.as_ref(),
-                &JsValue::from_f64(1500.0),
-            );
-            cb.forget();
+    let copy_as = move |label: &'static str, text: String| {
+        spawn_local(async move {
+            if copy(&text).await {
+                copied.set(Some(label));
+                set_timeout(move || if copied.get_untracked() == Some(label) { copied.set(None) }, Duration::from_millis(1400));
+            } else {
+                note.set(Some("The clipboard didn't take it. Click the popup first, then try again.".into()));
+            }
+        });
+    };
+    let clear = move |_| {
+        history.set(Vec::new());
+        spawn_local(async move {
+            let _ = storage::sync::remove(HISTORY).await;
         });
     };
 
-    let on_swatch_click = move |color: String| {
-        current_color.set(color);
-    };
-
     view! {
-        <style>
-            "* { margin: 0; padding: 0; box-sizing: border-box; }
-            body { width: 280px; font-family: -apple-system, BlinkMacSystemFont, sans-serif;
-                   background: #0f0f0f; color: #e0e0e0; padding: 1.25rem; }
-            h1 { font-size: 0.65rem; font-weight: 500; letter-spacing: 0.15em;
-                 text-transform: uppercase; color: #888; margin-bottom: 1rem; text-align: center; }
-            .preview { width: 100%; height: 100px; border-radius: 12px; border: 1.5px solid #333;
-                       margin-bottom: 0.75rem; transition: background-color 0.2s ease; }
-            .hex { font-size: 1.5rem; font-weight: 300; font-family: 'SF Mono', 'Cascadia Code',
-                   'Fira Code', monospace; text-align: center; color: #fff;
-                   margin-bottom: 1rem; letter-spacing: 0.05em; cursor: pointer;
-                   transition: color 0.15s ease; user-select: none; }
-            .hex:hover { color: #aaa; }
-            .copied { font-size: 0.6rem; color: #50e070; text-align: center;
-                      margin-top: -0.7rem; margin-bottom: 0.7rem; letter-spacing: 0.1em;
-                      text-transform: uppercase; }
-            .pick-btn { display: block; width: 100%; padding: 0.7rem; border-radius: 22px;
-                        border: 1.5px solid #333; background: transparent; color: #e0e0e0;
-                        font-size: 0.8rem; letter-spacing: 0.08em; text-transform: uppercase;
-                        cursor: pointer; transition: all 0.15s ease; }
-            .pick-btn:hover { border-color: #e0e0e0; color: #fff; }
-            .pick-btn:active { background: #e0e0e0; color: #0f0f0f; }
-            .pick-btn:disabled { opacity: 0.4; cursor: not-allowed; }
-            .error { font-size: 0.65rem; color: #e05050; text-align: center;
-                     margin-top: 0.5rem; }
-            .divider { height: 1px; background: #222; margin: 1rem 0; }
-            .history-label { font-size: 0.6rem; font-weight: 500; letter-spacing: 0.15em;
-                             text-transform: uppercase; color: #666; margin-bottom: 0.6rem; }
-            .history-grid { display: grid; grid-template-columns: repeat(5, 1fr);
-                            gap: 6px; }
-            .swatch { width: 100%; aspect-ratio: 1; border-radius: 8px; border: 1.5px solid #333;
-                      cursor: pointer; transition: all 0.15s ease; }
-            .swatch:hover { border-color: #e0e0e0; transform: scale(1.1); }
-            .empty { font-size: 0.65rem; color: #555; text-align: center; padding: 0.75rem 0; }"
-        </style>
-        <h1>"Color Picker"</h1>
-        <div
-            class="preview"
-            style:background-color=move || current_color.get()
-        ></div>
-        <div class="hex" on:click=copy_hex title="Click to copy">
-            {move || current_color.get()}
-        </div>
-        {move || copied.get().then(|| view! { <div class="copied">"Copied!"</div> })}
-        <button
-            class="pick-btn"
-            on:click=pick_color
-            disabled=move || picking.get()
-        >
-            {move || if picking.get() { "Picking..." } else { "Pick Color" }}
-        </button>
-        {move || error_msg.get().map(|msg| view! { <div class="error">{msg}</div> })}
-        <div class="divider"></div>
-        <div class="history-label">"History"</div>
-        {move || {
-            let colors = history.get();
-            if colors.is_empty() {
-                view! { <div class="empty">"No colors picked yet"</div> }.into_any()
-            } else {
-                view! {
-                    <div class="history-grid">
-                        {colors
-                            .into_iter()
-                            .map(|color| {
-                                let bg = color.clone();
-                                let click_color = color.clone();
-                                view! {
-                                    <div
-                                        class="swatch"
-                                        style:background-color=bg
-                                        title=color
-                                        on:click=move |_| on_swatch_click(click_color.clone())
-                                    ></div>
-                                }
-                            })
-                            .collect_view()}
+        <div class="popup picker" style=move || format!("--picked: {}; --picked-ink: {}", current.get().hex(), current.get().ink())>
+            <div class="preview">
+                <span class="preview-hex">{move || current.get().hex()}</span>
+                <span class="preview-name">{move || current.get().describe()}</span>
+            </div>
+            <div class="body">
+                {if can_pick {
+                    view! {
+                        <button class="btn primary lg pick" on:click=pick disabled=move || picking.get()>
+                            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m14 7 3 3"/><path d="M5 19l1-4 9-9a2.1 2.1 0 0 1 3 3l-9 9z"/><path d="M5 19h0"/></svg>
+                            {move || if picking.get() { "Click anywhere to pick…" } else { "Pick from screen" }}
+                        </button>
+                    }.into_any()
+                } else {
+                    view! {
+                        <label class="btn lg pick fallback">
+                            <input
+                                type="color"
+                                prop:value=move || current.get().hex()
+                                on:change=move |ev| if let Some(color) = Color::parse(&event_target_value(&ev)) { remember(color) }
+                            />
+                            "Choose a color"
+                        </label>
+                        <p class="hint-line">"This browser has no eyedropper yet, so the system color picker opens instead."</p>
+                    }.into_any()
+                }}
+                {move || note.get().map(|text| view! { <div class="notice">{text}</div> })}
+                <section class="card formats">
+                    {move || {
+                        let color = current.get();
+                        [("HEX", color.hex()), ("RGB", color.rgb()), ("HSL", color.hsl())].into_iter().map(|(label, text)| {
+                            let value = text.clone();
+                            view! {
+                                <button class="format" title=format!("Copy {text}") on:click=move |_| copy_as(label, value.clone())>
+                                    <span class="format-label">{label}</span>
+                                    <span class="mono format-value">{text.clone()}</span>
+                                    <span class="format-copy">{move || if copied.get() == Some(label) { "Copied" } else { "Copy" }}</span>
+                                </button>
+                            }
+                        }).collect_view()
+                    }}
+                </section>
+                <section>
+                    <div class="row-head">
+                        <span class="section-title">"Recent"</span>
+                        <Show when=move || history.with(|list| !list.is_empty())>
+                            <button class="btn ghost small" on:click=clear>"Clear"</button>
+                        </Show>
                     </div>
-                }
-                .into_any()
-            }
-        }}
+                    {move || {
+                        let list = history.get();
+                        if list.is_empty() {
+                            return view! { <div class="empty small">"Colors you pick land here, on every computer you're signed in to."</div> }.into_any();
+                        }
+                        view! {
+                            <div class="swatches">
+                                {list.into_iter().filter_map(|hex| Color::parse(&hex)).map(|color| view! {
+                                    <button
+                                        class="swatch"
+                                        class:selected=move || current.get() == color
+                                        style=format!("background: {}", color.hex())
+                                        title=color.hex()
+                                        aria-label=format!("Use {}", color.hex())
+                                        on:click=move |_| current.set(color)
+                                    ></button>
+                                }).collect_view()}
+                            </div>
+                        }.into_any()
+                    }}
+                </section>
+            </div>
+        </div>
     }
 }

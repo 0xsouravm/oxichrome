@@ -1,0 +1,120 @@
+:root {
+  --accent: #3466e0;
+  --accent-soft: #e7edfc;
+  --accent-ink: #ffffff;
+  --warn: #c25a14;
+  --warn-soft: #fdf0e6;
+  --warn-ink: #ffffff;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --accent: #84a6ff;
+    --accent-soft: #1c2541;
+    --accent-ink: #0b1124;
+    --warn: #f0a160;
+    --warn-soft: #34231a;
+    --warn-ink: #2b1607;
+  }
+}
+
+.popup .body {
+  max-height: 452px;
+}
+
+.item.current .title::after {
+  content: "";
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-left: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  vertical-align: middle;
+}
+
+.item .sub .dot {
+  margin: 0 5px;
+  color: var(--faint);
+}
+
+.item .sub .warn {
+  color: var(--warn);
+  font-weight: 550;
+}
+
+.dupes {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 10px 10px 12px;
+  border-radius: var(--radius);
+  background: var(--warn-soft);
+  border: 1px solid color-mix(in srgb, var(--warn) 22%, transparent);
+}
+
+.dupes-icon {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--warn) 14%, transparent);
+  color: var(--warn);
+  flex: none;
+}
+
+.dupes-icon svg {
+  width: 16px;
+  height: 16px;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.dupes-title {
+  font-weight: 600;
+  color: var(--warn);
+}
+
+.dupes-hint {
+  font-size: 11.5px;
+  color: var(--muted);
+}
+
+.dupes .btn.primary {
+  background: var(--warn);
+  color: var(--warn-ink);
+}
+
+.skeleton {
+  height: 180px;
+  background: linear-gradient(90deg, var(--surface), var(--raised), var(--surface));
+  background-size: 200% 100%;
+  animation: shimmer 1.2s linear infinite;
+}
+
+@keyframes shimmer {
+  to {
+    background-position: -200% 0;
+  }
+}
+
+.link {
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font-weight: 550;
+  cursor: pointer;
+  padding: 0 2px;
+}
+
+.link:hover {
+  text-decoration: underline;
+}
+
+.foot .row-flex {
+  gap: 6px;
+}

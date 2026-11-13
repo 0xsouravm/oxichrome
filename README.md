@@ -102,10 +102,20 @@ oxichrome/
 ├── oxichrome-macros/     proc macros
 ├── oxichrome-build/      reads macro metadata from the built WASM, generates manifest/shims
 ├── oxichrome-cli/        the cargo oxichrome command
-└── examples/
-    ├── counter-extension/
-    └── color-picker/
+└── examples/             each one builds for Chrome and Firefox and has its own README
 ```
+
+## Examples
+
+| Example | What it is | What it covers |
+|---|---|---|
+| [counter-extension](examples/counter-extension) | A number in the popup, saved and shown on the toolbar. Read this one first. | extension, background, popup, options page, storage, badge |
+| [color-picker](examples/color-picker) | Pick a color from screen, copy it as HEX, RGB or HSL | a web API through `wasm_bindgen`, a fallback for browsers without it, sync storage, clipboard |
+| [tab-tidy](examples/tab-tidy) | Search every open tab, act on it, and close duplicates in one click | tabs, side panel, commands, context menus with submenus, translations |
+| [focus-timer](examples/focus-timer) | A focus and break timer that pauses when you step away | alarms, notifications with buttons, idle, commands, sync storage |
+| [page-lens](examples/page-lens) | Reading stats, an outline and notes for any page | content scripts on demand and automatic, messages, offscreen documents, downloads, optional permissions |
+| [quiet-web](examples/quiet-web) | Block trackers and sites, strip tracking parameters, clear cookies | declarative net request rule sets and dynamic rules, cookies, web navigation, permissions |
+| [launchpad](examples/launchpad) | Search, top sites, history and saved pages in one popup | omnibox, search, top sites, bookmarks, history, management |
 
 ## Proc macros
 

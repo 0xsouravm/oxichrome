@@ -8,6 +8,11 @@ members = [
     "oxichrome-cli",
     "examples/counter-extension",
     "examples/color-picker",
+    "examples/tab-tidy",
+    "examples/focus-timer",
+    "examples/page-lens",
+    "examples/quiet-web",
+    "examples/launchpad",
 ]
 
 [workspace.package]
