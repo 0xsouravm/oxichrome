@@ -97,6 +97,9 @@ fn validate_match_pattern(pattern: &LitStr, kind: &str) -> syn::Result<()> {
         if !digits || port.parse::<u16>().is_err() {
             return fail(&format!("invalid port `{port}`"));
         }
+        return fail(&format!(
+            "Firefox never matches a pattern with a port, so it would give no access there; leave `:{port}` out (a pattern without a port matches every port)"
+        ));
     }
 
     Ok(())
@@ -1344,11 +1347,7 @@ mod tests {
             "file:///C:/*",
             "file://somehost/path",
             "file://*/*",
-            "http://127.0.0.1:8080/*",
-            "http://a.com:0/*",
-            "http://a.com:65535/*",
             "https://[::1]/*",
-            "https://[::1]:8080/*",
             "https://*/",
             "https://a.com/p?q=1",
         ];
@@ -1396,6 +1395,11 @@ mod tests {
             ("wss://example.org/*", "Firefox only"),
             ("HTTPS://a.com/*", "uppercase scheme"),
             ("urn:*", "unsupported scheme"),
+            ("http://localhost:8080/*", "a port Firefox never matches"),
+            ("http://127.0.0.1:8080/*", "a port Firefox never matches"),
+            ("http://a.com:0/*", "a port Firefox never matches"),
+            ("http://a.com:65535/*", "a port Firefox never matches"),
+            ("https://[::1]:443/*", "a port after IPv6"),
         ];
 
         for (pattern, _reason) in invalid_patterns {
@@ -1601,7 +1605,7 @@ mod tests {
 
     #[test]
     fn parse_content_script_args_checks_the_whole_pattern() {
-        for pattern in ["file:///*", "https://[::1]:8080/*", "*://*.example.org/*"] {
+        for pattern in ["file:///*", "https://[::1]/*", "*://*.example.org/*"] {
             let tokens = quote::quote! { matches = [#pattern] };
             assert!(
                 syn::parse2::<ContentScriptArgs>(tokens).is_ok(),
@@ -1613,6 +1617,7 @@ mod tests {
             "https://mozilla.org",
             "https://*.*/*",
             "ws://a.org/*",
+            "https://[::1]:8080/*",
         ] {
             let tokens = quote::quote! { matches = [#pattern] };
             let err = syn::parse2::<ContentScriptArgs>(tokens).expect_err(pattern);
