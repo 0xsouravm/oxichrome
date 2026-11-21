@@ -116,6 +116,7 @@ The argument can be a path (`cargo oxichrome new extensions/my-extension`); its 
 | `cargo oxichrome build --release` | Optimized release build |
 | `cargo oxichrome build --target firefox` | Build for Firefox |
 | `cargo oxichrome clean` | Remove the `dist/` directory |
+| `cargo oxichrome version` | Print the installed version (also `--version` or `-V`) |
 | `cargo oxichrome new <path>` | Make a new extension project; see the flags above |
 
 ## Project structure
