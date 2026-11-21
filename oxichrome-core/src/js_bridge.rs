@@ -457,6 +457,8 @@ export function windows_all(populate) {
 export function windows_create(data) {
     if (!isFirefox()) {
         delete data.titlePreface;
+    } else if (data.focused === false) {
+        delete data.focused;
     }
     return api().create(data).then((window) => window ?? null);
 }
@@ -1519,4 +1521,372 @@ extern "C" {
 
     #[wasm_bindgen(catch)]
     pub fn management_uninstall_self(confirm: bool) -> Result<js_sys::Promise, JsValue>;
+}
+
+#[wasm_bindgen(inline_js = r#"
+const portGroups = new WeakMap();
+
+export function port_wrap(raw) {
+    if (raw && raw.__oxichrome_port === true) {
+        return raw;
+    }
+    let group = portGroups.get(raw);
+    if (!group) {
+        group = [];
+        portGroups.set(raw, group);
+    }
+    const queue = [];
+    const waiters = [];
+    const closedWaiters = [];
+    let open = true;
+    let reason = null;
+    const close = (why) => {
+        if (!open) {
+            return;
+        }
+        open = false;
+        reason = why;
+        waiters.splice(0).forEach((resolve) => resolve(undefined));
+        closedWaiters.splice(0).forEach((resolve) => resolve(reason));
+    };
+    const port = {
+        __oxichrome_port: true,
+        close,
+        name: raw.name,
+        sender: raw.sender,
+        next() {
+            if (queue.length > 0) {
+                return Promise.resolve({ value: queue.shift() });
+            }
+            if (!open) {
+                return Promise.resolve(undefined);
+            }
+            return new Promise((resolve) => waiters.push(resolve));
+        },
+        post(message) {
+            if (!open) {
+                throw new Error('the port is closed');
+            }
+            raw.postMessage(message);
+        },
+        disconnect() {
+            if (!open) {
+                return;
+            }
+            group.forEach((other) => other.close(null));
+            raw.disconnect();
+        },
+        isOpen() {
+            return open;
+        },
+        closed() {
+            return open ? new Promise((resolve) => closedWaiters.push(resolve)) : Promise.resolve(reason);
+        },
+    };
+    group.push(port);
+    raw.onMessage.addListener((message) => {
+        if (!open) {
+            return;
+        }
+        const waiter = waiters.shift();
+        if (waiter) {
+            waiter({ value: message });
+        } else {
+            queue.push(message);
+        }
+    });
+    raw.onDisconnect.addListener((p) => {
+        const lastError = globalThis.chrome?.runtime?.lastError;
+        close((p && p.error && p.error.message) || (lastError && lastError.message) || null);
+    });
+    return port;
+}
+
+export function port_name(port) { return port.name || ''; }
+export function port_sender(port) { return port.sender; }
+export function port_post(port, message) { port.post(message); }
+export function port_next(port) { return port.next(); }
+export function port_disconnect(port) { port.disconnect(); }
+export function port_is_open(port) { return port.isOpen(); }
+export function port_closed(port) { return port.closed(); }
+
+export function runtime_connect(name) { return chrome.runtime.connect({ name }); }
+export function tabs_connect(tab, name, frame) {
+    return chrome.tabs.connect(tab, frame === undefined ? { name } : { name, frameId: frame });
+}
+export function tabs_send_message_to(tab, message, frame) {
+    return chrome.tabs.sendMessage(tab, message, frame === undefined ? {} : { frameId: frame });
+}
+export function runtime_on_connect_add(callback) { chrome.runtime.onConnect.addListener(callback); }
+export function runtime_add_listener(callback) { chrome.runtime.onMessage.addListener(callback); }
+export function runtime_remove_listener(callback) {
+    chrome.runtime.onMessage.removeListener(callback);
+    chrome.runtime.onConnect.removeListener(callback);
+}
+export function runtime_id() { return chrome.runtime.id; }
+export function runtime_manifest() { return chrome.runtime.getManifest(); }
+export function runtime_platform_info() { return chrome.runtime.getPlatformInfo(); }
+export function runtime_open_options_page() { return chrome.runtime.openOptionsPage(); }
+export function runtime_set_uninstall_url(url) { return chrome.runtime.setUninstallURL(url); }
+export function runtime_reload() { chrome.runtime.reload(); }
+"#)]
+extern "C" {
+    pub fn port_wrap(raw: &JsValue) -> JsValue;
+    pub fn port_name(port: &JsValue) -> String;
+    pub fn port_sender(port: &JsValue) -> JsValue;
+    #[wasm_bindgen(catch)]
+    pub fn port_post(port: &JsValue, message: &JsValue) -> Result<(), JsValue>;
+    pub fn port_next(port: &JsValue) -> js_sys::Promise;
+    pub fn port_disconnect(port: &JsValue);
+    pub fn port_is_open(port: &JsValue) -> bool;
+    pub fn port_closed(port: &JsValue) -> js_sys::Promise;
+
+    #[wasm_bindgen(catch)]
+    pub fn runtime_connect(name: &str) -> Result<JsValue, JsValue>;
+    #[wasm_bindgen(catch)]
+    pub fn tabs_connect(tab: i32, name: &str, frame: Option<f64>) -> Result<JsValue, JsValue>;
+    #[wasm_bindgen(catch)]
+    pub fn tabs_send_message_to(tab: i32, message: &JsValue, frame: Option<f64>) -> Result<js_sys::Promise, JsValue>;
+    pub fn runtime_on_connect_add(callback: &JsValue);
+    pub fn runtime_add_listener(callback: &JsValue);
+    pub fn runtime_remove_listener(callback: &JsValue);
+    pub fn runtime_id() -> String;
+    pub fn runtime_manifest() -> JsValue;
+    #[wasm_bindgen(catch)]
+    pub fn runtime_platform_info() -> Result<js_sys::Promise, JsValue>;
+    #[wasm_bindgen(catch)]
+    pub fn runtime_open_options_page() -> Result<js_sys::Promise, JsValue>;
+    #[wasm_bindgen(catch)]
+    pub fn runtime_set_uninstall_url(url: &str) -> Result<js_sys::Promise, JsValue>;
+    pub fn runtime_reload();
+}
+
+#[wasm_bindgen]
+extern "C" {
+    #[wasm_bindgen(js_namespace = ["chrome", "runtime", "onConnect"], js_name = addListener)]
+    pub fn chrome_runtime_on_connect_add_listener(callback: &Closure<dyn FnMut(JsValue)>);
+}
+
+#[wasm_bindgen]
+extern "C" {
+    #[wasm_bindgen(js_namespace = ["chrome", "tabs", "onCreated"], js_name = addListener)]
+    pub fn chrome_tabs_on_created_add_listener(callback: &Closure<dyn FnMut(JsValue)>);
+    #[wasm_bindgen(js_namespace = ["chrome", "tabs", "onMoved"], js_name = addListener)]
+    pub fn chrome_tabs_on_moved_add_listener(callback: &Closure<dyn FnMut(JsValue, JsValue)>);
+    #[wasm_bindgen(js_namespace = ["chrome", "tabs", "onAttached"], js_name = addListener)]
+    pub fn chrome_tabs_on_attached_add_listener(callback: &Closure<dyn FnMut(JsValue, JsValue)>);
+    #[wasm_bindgen(js_namespace = ["chrome", "tabs", "onDetached"], js_name = addListener)]
+    pub fn chrome_tabs_on_detached_add_listener(callback: &Closure<dyn FnMut(JsValue, JsValue)>);
+    #[wasm_bindgen(js_namespace = ["chrome", "tabs", "onHighlighted"], js_name = addListener)]
+    pub fn chrome_tabs_on_highlighted_add_listener(callback: &Closure<dyn FnMut(JsValue)>);
+    #[wasm_bindgen(js_namespace = ["chrome", "tabGroups", "onCreated"], js_name = addListener)]
+    pub fn chrome_tab_groups_on_created_add_listener(callback: &Closure<dyn FnMut(JsValue)>);
+    #[wasm_bindgen(js_namespace = ["chrome", "tabGroups", "onUpdated"], js_name = addListener)]
+    pub fn chrome_tab_groups_on_updated_add_listener(callback: &Closure<dyn FnMut(JsValue)>);
+    #[wasm_bindgen(js_namespace = ["chrome", "tabGroups", "onRemoved"], js_name = addListener)]
+    pub fn chrome_tab_groups_on_removed_add_listener(callback: &Closure<dyn FnMut(JsValue)>);
+    #[wasm_bindgen(js_namespace = ["chrome", "tabGroups", "onMoved"], js_name = addListener)]
+    pub fn chrome_tab_groups_on_moved_add_listener(callback: &Closure<dyn FnMut(JsValue)>);
+}
+
+#[wasm_bindgen(inline_js = r#"
+export function tabs_call(method, args) {
+    return Promise.resolve(chrome.tabs[method](...args));
+}
+
+export function tabs_group_call(method, arg) {
+    if (typeof globalThis.chrome?.tabs?.[method] !== 'function') {
+        throw new Error('oxichrome:no-tab-groups');
+    }
+    return Promise.resolve(chrome.tabs[method](arg));
+}
+
+export function tab_groups_call(method, args) {
+    const api = globalThis.chrome?.tabGroups;
+    if (!api || typeof api[method] !== 'function') {
+        throw new Error('oxichrome:no-tab-groups');
+    }
+    return Promise.resolve(api[method](...args));
+}
+
+let lastCapture = 0;
+let captureQueue = Promise.resolve();
+
+export function tabs_capture(window, options) {
+    const run = async () => {
+        for (let attempt = 0; ; attempt++) {
+            const wait = lastCapture + 520 - Date.now();
+            if (wait > 0) {
+                await new Promise((resolve) => setTimeout(resolve, wait));
+            }
+            lastCapture = Date.now();
+            try {
+                return await (window === undefined ? chrome.tabs.captureVisibleTab(options) : chrome.tabs.captureVisibleTab(window, options));
+            } catch (error) {
+                if (attempt < 8 && String(error && error.message).includes('MAX_CAPTURE_VISIBLE_TAB_CALLS_PER_SECOND')) {
+                    continue;
+                }
+                throw error;
+            }
+        }
+    };
+    const result = captureQueue.then(run, run);
+    captureQueue = result.catch(() => {});
+    return result;
+}
+"#)]
+extern "C" {
+    #[wasm_bindgen(catch)]
+    pub fn tabs_call(method: &str, args: &[JsValue]) -> Result<js_sys::Promise, JsValue>;
+    #[wasm_bindgen(catch)]
+    pub fn tabs_group_call(method: &str, arg: &JsValue) -> Result<js_sys::Promise, JsValue>;
+    #[wasm_bindgen(catch)]
+    pub fn tab_groups_call(method: &str, args: &js_sys::Array) -> Result<js_sys::Promise, JsValue>;
+    #[wasm_bindgen(catch)]
+    pub fn tabs_capture(window: &JsValue, options: &JsValue) -> Result<js_sys::Promise, JsValue>;
+}
+
+#[wasm_bindgen]
+extern "C" {
+    #[wasm_bindgen(js_namespace = ["chrome", "webRequest", "onBeforeRequest"], js_name = addListener)]
+    pub fn chrome_web_request_on_before_request_add_listener(callback: &Closure<dyn FnMut(JsValue, JsValue)>);
+    #[wasm_bindgen(js_namespace = ["chrome", "webRequest", "onBeforeSendHeaders"], js_name = addListener)]
+    pub fn chrome_web_request_on_before_send_headers_add_listener(callback: &Closure<dyn FnMut(JsValue, JsValue)>);
+    #[wasm_bindgen(js_namespace = ["chrome", "webRequest", "onSendHeaders"], js_name = addListener)]
+    pub fn chrome_web_request_on_send_headers_add_listener(callback: &Closure<dyn FnMut(JsValue, JsValue)>);
+    #[wasm_bindgen(js_namespace = ["chrome", "webRequest", "onHeadersReceived"], js_name = addListener)]
+    pub fn chrome_web_request_on_headers_received_add_listener(callback: &Closure<dyn FnMut(JsValue, JsValue)>);
+    #[wasm_bindgen(js_namespace = ["chrome", "webRequest", "onResponseStarted"], js_name = addListener)]
+    pub fn chrome_web_request_on_response_started_add_listener(callback: &Closure<dyn FnMut(JsValue, JsValue)>);
+    #[wasm_bindgen(js_namespace = ["chrome", "webRequest", "onBeforeRedirect"], js_name = addListener)]
+    pub fn chrome_web_request_on_before_redirect_add_listener(callback: &Closure<dyn FnMut(JsValue, JsValue)>);
+    #[wasm_bindgen(js_namespace = ["chrome", "webRequest", "onCompleted"], js_name = addListener)]
+    pub fn chrome_web_request_on_completed_add_listener(callback: &Closure<dyn FnMut(JsValue, JsValue)>);
+    #[wasm_bindgen(js_namespace = ["chrome", "webRequest", "onErrorOccurred"], js_name = addListener)]
+    pub fn chrome_web_request_on_error_occurred_add_listener(callback: &Closure<dyn FnMut(JsValue, JsValue)>);
+    #[wasm_bindgen(js_namespace = ["chrome", "webRequest", "onAuthRequired"], js_name = addListener)]
+    pub fn chrome_web_request_on_auth_required_add_listener(callback: &Closure<dyn FnMut(JsValue, JsValue)>);
+}
+
+#[wasm_bindgen(inline_js = r#"
+export function web_request_handler_behavior_changed() {
+    if (typeof globalThis.chrome?.webRequest?.handlerBehaviorChanged !== 'function') {
+        throw new Error('oxichrome:no-permission');
+    }
+    return Promise.resolve(chrome.webRequest.handlerBehaviorChanged());
+}
+"#)]
+extern "C" {
+    #[wasm_bindgen(catch)]
+    pub fn web_request_handler_behavior_changed() -> Result<js_sys::Promise, JsValue>;
+}
+
+#[wasm_bindgen]
+extern "C" {
+    #[wasm_bindgen(js_namespace = ["chrome", "runtime", "onUserScriptMessage"], js_name = addListener)]
+    pub fn chrome_runtime_on_user_script_message_add_listener(callback: &Closure<dyn FnMut(JsValue, JsValue, JsValue)>);
+}
+
+#[wasm_bindgen(inline_js = r#"
+export function user_scripts_state() {
+    if (globalThis.chrome?.userScripts) {
+        return Promise.resolve('ready');
+    }
+    if (typeof globalThis.chrome?.permissions?.contains !== 'function') {
+        return Promise.resolve('permission');
+    }
+    return chrome.permissions.contains({ permissions: ['userScripts'] }).then((has) => (has ? 'toggle' : 'permission'), () => 'permission');
+}
+
+export function user_scripts_call(method, args) {
+    const api = globalThis.chrome?.userScripts;
+    if (!api) {
+        return user_scripts_state().then((state) => {
+            throw new Error(state === 'toggle' ? 'oxichrome:needs-toggle' : 'oxichrome:needs-permission');
+        });
+    }
+    return Promise.resolve(api[method](...args));
+}
+"#)]
+extern "C" {
+    pub fn user_scripts_state() -> js_sys::Promise;
+    #[wasm_bindgen(catch)]
+    pub fn user_scripts_call(method: &str, args: &js_sys::Array) -> Result<js_sys::Promise, JsValue>;
+}
+
+#[wasm_bindgen(inline_js = r#"
+const devtools = () => globalThis.chrome?.devtools;
+export function devtools_tab_id() { return devtools()?.inspectedWindow?.tabId; }
+export function devtools_theme() { return devtools()?.panels?.themeName; }
+export function devtools_eval(code) {
+    const api = devtools();
+    if (!api) { return Promise.reject(new Error('oxichrome:no-devtools')); }
+    // JSON on the page side, so both browsers hand back the same value.
+    const wrapped = '(() => { const value = eval(' + JSON.stringify(code) + '); return value === undefined ? undefined : JSON.stringify(value); })()';
+    return new Promise((resolve, reject) => {
+        api.inspectedWindow.eval(wrapped, (result, info) => {
+            if (info && info.isException) { reject(new Error('oxichrome:threw:' + String(info.value))); }
+            else if (info && info.isError) { reject(new Error('oxichrome:refused:' + [info.description, ...(info.details || [])].join(' '))); }
+            else { resolve(result === undefined ? 'null' : result); }
+        });
+    });
+}
+export function devtools_reload(ignoreCache) {
+    const api = devtools();
+    if (!api) { return false; }
+    api.inspectedWindow.reload({ ignoreCache });
+    return true;
+}
+export function devtools_listen(kind, callback) {
+    const api = devtools();
+    if (!api) { return undefined; }
+    if (kind === 'shown' || kind === 'hidden') {
+        const name = 'oxichrome-devtools-' + kind;
+        const listener = () => callback();
+        window.addEventListener(name, listener);
+        // The panel is usually shown before its wasm loads, so a new shown listener runs at once.
+        if (kind === 'shown' && window.__oxichromeDevtoolsShown) { queueMicrotask(listener); }
+        return () => window.removeEventListener(name, listener);
+    }
+    if (kind === 'navigated') {
+        const listener = (url) => callback(url);
+        api.network.onNavigated.addListener(listener);
+        return () => api.network.onNavigated.removeListener(listener);
+    }
+    const listener = (entry) => callback({
+        url: entry?.request?.url ?? '',
+        method: entry?.request?.method ?? '',
+        status: entry?.response?.status ?? 0,
+        mimeType: entry?.response?.content?.mimeType ?? null,
+        time: entry?.time ?? null,
+    });
+    api.network.onRequestFinished.addListener(listener);
+    return () => api.network.onRequestFinished.removeListener(listener);
+}
+"#)]
+extern "C" {
+    pub fn devtools_tab_id() -> JsValue;
+    pub fn devtools_theme() -> JsValue;
+    pub fn devtools_eval(code: &str) -> js_sys::Promise;
+    pub fn devtools_reload(ignore_cache: bool) -> bool;
+    pub fn devtools_listen(kind: &str, callback: &JsValue) -> JsValue;
+}
+
+#[wasm_bindgen(inline_js = r#"
+export function sessions_call(op, arg) {
+    const api = globalThis.chrome?.sessions;
+    if (!api) { throw new Error('oxichrome:no-permission'); }
+    const run = op === 'recent' ? api.getRecentlyClosed({ maxResults: arg }) : api.restore(arg);
+    return run.then((value) => JSON.stringify(value ?? null));
+}
+export function on_sessions_changed(callback) {
+    globalThis.chrome?.sessions?.onChanged.addListener(callback);
+}
+"#)]
+extern "C" {
+    #[wasm_bindgen(catch)]
+    pub fn sessions_call(op: &str, arg: &JsValue) -> Result<js_sys::Promise, JsValue>;
+
+    #[wasm_bindgen(js_name = on_sessions_changed)]
+    pub fn chrome_sessions_on_changed_add_listener(callback: &Closure<dyn FnMut(JsValue)>);
 }

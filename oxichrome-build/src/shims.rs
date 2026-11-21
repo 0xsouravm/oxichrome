@@ -1,6 +1,6 @@
 //! Generates JS shims and HTML shells for loading WASM in Chrome extensions.
 
-use crate::metadata::ExtensionMetadata;
+use crate::metadata::{EventHandler, ExtensionMetadata};
 
 fn snake_to_camel(name: &str) -> String {
     let mut parts = name.split('_');
@@ -285,6 +285,87 @@ pub fn left_out_events(metadata: &ExtensionMetadata, browser: crate::Browser) ->
     left_out
 }
 
+/// Must match `port_wrap` in oxichrome-core's js_bridge.rs (checked by a test).
+const PORT_WRAPPER: &str = r#"const portGroups = new WeakMap();
+
+function wrapPort(raw) {
+    if (raw && raw.__oxichrome_port === true) {
+        return raw;
+    }
+    let group = portGroups.get(raw);
+    if (!group) {
+        group = [];
+        portGroups.set(raw, group);
+    }
+    const queue = [];
+    const waiters = [];
+    const closedWaiters = [];
+    let open = true;
+    let reason = null;
+    const close = (why) => {
+        if (!open) {
+            return;
+        }
+        open = false;
+        reason = why;
+        waiters.splice(0).forEach((resolve) => resolve(undefined));
+        closedWaiters.splice(0).forEach((resolve) => resolve(reason));
+    };
+    const port = {
+        __oxichrome_port: true,
+        close,
+        name: raw.name,
+        sender: raw.sender,
+        next() {
+            if (queue.length > 0) {
+                return Promise.resolve({ value: queue.shift() });
+            }
+            if (!open) {
+                return Promise.resolve(undefined);
+            }
+            return new Promise((resolve) => waiters.push(resolve));
+        },
+        post(message) {
+            if (!open) {
+                throw new Error('the port is closed');
+            }
+            raw.postMessage(message);
+        },
+        disconnect() {
+            if (!open) {
+                return;
+            }
+            group.forEach((other) => other.close(null));
+            raw.disconnect();
+        },
+        isOpen() {
+            return open;
+        },
+        closed() {
+            return open ? new Promise((resolve) => closedWaiters.push(resolve)) : Promise.resolve(reason);
+        },
+    };
+    group.push(port);
+    raw.onMessage.addListener((message) => {
+        if (!open) {
+            return;
+        }
+        const waiter = waiters.shift();
+        if (waiter) {
+            waiter({ value: message });
+        } else {
+            queue.push(message);
+        }
+    });
+    raw.onDisconnect.addListener((p) => {
+        const lastError = globalThis.chrome?.runtime?.lastError;
+        close((p && p.error && p.error.message) || (lastError && lastError.message) || null);
+    });
+    return port;
+}
+
+"#;
+
 fn generate_listeners(metadata: &ExtensionMetadata) -> String {
     let mut events: Vec<(String, Vec<String>)> = Vec::new();
     for handler in &metadata.event_handlers {
@@ -305,6 +386,11 @@ fn generate_listeners(metadata: &ExtensionMetadata) -> String {
         Some((_, chunk)) => chunk.push_str(&js),
         None => chunks.push((namespace.to_string(), js)),
     };
+    let requests: Vec<&EventHandler> = metadata.event_handlers.iter().filter(|handler| handler.namespace == "web_request").collect();
+    events.retain(|(event, _)| !event.starts_with("chrome.webRequest."));
+    if !requests.is_empty() {
+        add("webRequest", generate_web_request(&requests));
+    }
     let navigation: Vec<(String, Vec<String>)> = events
         .iter()
         .filter(|(event, _)| event.starts_with("chrome.webNavigation."))
@@ -350,16 +436,79 @@ self.addEventListener('unhandledrejection', (event) => releaseRepliesOnTrap(even
     if (isInternalMessage(args[0])) {{
         return;
     }}
-    const reply = args[2];
+    const respond = args[2];
+    let replied = false;
+    const reply = (value) => {{
+        if (replied) {{
+            return false;
+        }}
+        replied = true;
+        openReplies.delete(reply);
+        respond(value);
+        return true;
+    }};
+    args[2] = reply;
     openReplies.add(reply);
     dispatch(() => {{
         Promise.allSettled([{handlers}].map(async (handler) => handler(...args)))
-            .then(() => {{
-                openReplies.delete(reply);
-                reply();
-            }});
+            .then(() => reply());
     }});
     return true;
+}});
+"#
+            ));
+        } else if event == "chrome.runtime.onUserScriptMessage" {
+            listeners.push_str(&format!(
+                r#"const openUserScriptReplies = new Set();
+
+function releaseUserScriptRepliesOnTrap(error) {{
+    if (error instanceof WebAssembly.RuntimeError) {{
+        openUserScriptReplies.forEach((reply) => reply());
+        openUserScriptReplies.clear();
+    }}
+}}
+
+self.addEventListener('error', (event) => releaseUserScriptRepliesOnTrap(event.error));
+self.addEventListener('unhandledrejection', (event) => releaseUserScriptRepliesOnTrap(event.reason));
+
+function listenToUserScripts() {{
+    if (listenToUserScripts.done || !globalThis.chrome?.runtime?.onUserScriptMessage) {{
+        return;
+    }}
+    listenToUserScripts.done = true;
+    chrome.runtime.onUserScriptMessage.addListener((...args) => {{
+        const respond = args[2];
+        let replied = false;
+        const reply = (value) => {{
+            if (replied) {{
+                return false;
+            }}
+            replied = true;
+            openUserScriptReplies.delete(reply);
+            respond(value);
+            return true;
+        }};
+        args[2] = reply;
+        openUserScriptReplies.add(reply);
+        dispatch(() => {{
+            Promise.allSettled([{handlers}].map(async (handler) => handler(...args)))
+                .then(() => reply());
+        }});
+        return true;
+    }});
+}}
+
+listenToUserScripts();
+globalThis.chrome?.permissions?.onAdded?.addListener(listenToUserScripts);
+"#
+            ));
+        } else if event == "chrome.runtime.onConnect" {
+            listeners.push_str(PORT_WRAPPER);
+            listeners.push_str(&format!(
+                r#"{event}.addListener((raw) => {{
+    const handlers = [{handlers}];
+    const ports = handlers.map(() => wrapPort(raw));
+    dispatch(() => handlers.forEach((handler, i) => handler(ports[i])));
 }});
 "#
             ));
@@ -453,6 +602,36 @@ globalThis.chrome?.storage?.session?.get([idleKey, '__oxichrome_idle_interval'])
 }});
 "#
             ));
+        } else if event == "chrome.tabs.onHighlighted" {
+            listeners.push_str(&format!(
+                r#"const highlightedSeen = new Map();
+chrome.windows?.onRemoved?.addListener((id) => highlightedSeen.delete(id));
+{event}.addListener((info) => {{
+    const key = info.tabIds.join(',');
+    if (highlightedSeen.get(info.windowId) === key) {{
+        return;
+    }}
+    highlightedSeen.set(info.windowId, key);
+    dispatch(() => [{handlers}].forEach((handler) => handler(info)));
+}});
+"#
+            ));
+        } else if event == "chrome.sessions.onChanged" {
+            // Chrome fires twice for one restore; one change, one call.
+            listeners.push_str(&format!(
+                r#"let sessionsChangePending = false;
+{event}.addListener(() => {{
+    if (sessionsChangePending) {{
+        return;
+    }}
+    sessionsChangePending = true;
+    setTimeout(() => {{
+        sessionsChangePending = false;
+        dispatch(() => [{handlers}].forEach((handler) => handler()));
+    }}, 50);
+}});
+"#
+            ));
         } else if event == "chrome.windows.onFocusChanged" {
             listeners.push_str(&format!(
                 r#"{event}.addListener((id) => {{
@@ -484,6 +663,97 @@ globalThis.chrome?.storage?.session?.get([idleKey, '__oxichrome_idle_interval'])
     }
     listeners
 }
+
+fn generate_web_request(handlers: &[&EventHandler]) -> String {
+    let mut js = String::from(WEB_REQUEST_HELPERS);
+    let auth = handlers.iter().any(|handler| handler.event_name == "on_auth_required");
+    for handler in handlers {
+        let event = snake_to_camel(&handler.event_name);
+        let filter = handler.filter.clone().unwrap_or(crate::metadata::RequestFilter { urls: vec!["<all_urls>".to_string()], types: Vec::new() });
+        let mut object = serde_json::json!({ "urls": filter.urls });
+        if !filter.types.is_empty() {
+            object["types"] = serde_json::json!(filter.types);
+        }
+        let export = &handler.export;
+        if handler.event_name == "on_auth_required" {
+            js.push_str(&format!("wrListen('onAuthRequired', {object}, (details, callback) => wrAnswer(details, callback, {export}));\n"));
+        } else if handler.event_name == "on_error_occurred" && auth {
+            js.push_str(&format!(
+                "wrListen('onErrorOccurred', {object}, (details) => {{\n    details.__oxichrome_auth_gave_up = wrGaveUp.has(details.requestId);\n    dispatch(() => {export}(details, details));\n}});\n"
+            ));
+        } else {
+            js.push_str(&format!("wrListen('{event}', {object}, (details) => dispatch(() => {export}(details, details)));\n"));
+        }
+    }
+    if auth {
+        js.push_str(WEB_REQUEST_AUTH_CLEANUP);
+    }
+    js
+}
+
+const WEB_REQUEST_HELPERS: &str = r#"const wrFirefox = typeof globalThis.browser?.runtime?.getBrowserInfo === 'function';
+const wrExtra = wrFirefox ? [] : ['extraHeaders'];
+const wrSpecs = {
+    onBeforeRequest: ['requestBody'],
+    onBeforeSendHeaders: ['requestHeaders', ...wrExtra],
+    onSendHeaders: ['requestHeaders', ...wrExtra],
+    onHeadersReceived: ['responseHeaders', ...wrExtra],
+    onResponseStarted: ['responseHeaders', ...wrExtra],
+    onBeforeRedirect: ['responseHeaders', ...wrExtra],
+    onCompleted: ['responseHeaders', ...wrExtra],
+    onErrorOccurred: wrExtra.length ? wrExtra : null,
+    onAuthRequired: ['responseHeaders', ...wrExtra, wrFirefox ? 'blocking' : 'asyncBlocking'],
+};
+const wrFirefoxTypes = { image: ['imageset'], ping: ['beacon'], object: ['object_subrequest'] };
+
+function wrListen(event, filter, listener) {
+    if (wrFirefox && filter.types) {
+        filter.types = filter.types.flatMap((type) => [type, ...(wrFirefoxTypes[type] ?? [])]);
+    }
+    const spec = wrSpecs[event];
+    if (spec) {
+        chrome.webRequest[event].addListener(listener, filter, spec);
+    } else {
+        chrome.webRequest[event].addListener(listener, filter);
+    }
+}
+
+const WR_MAX_AUTH_ATTEMPTS = 3;
+const wrAttempts = new Map();
+const wrGaveUp = new Set();
+
+function wrAnswer(details, callback, handler) {
+    const attempt = (wrAttempts.get(details.requestId) ?? 0) + 1;
+    wrAttempts.set(details.requestId, attempt);
+    details.__oxichrome_attempt = attempt;
+    const answer = new Promise((resolve) => {
+        if (attempt > WR_MAX_AUTH_ATTEMPTS) {
+            wrGaveUp.add(details.requestId);
+            resolve({ cancel: true });
+            return;
+        }
+        dispatch(() => Promise.resolve(handler(details, details)).then(
+            (reply) => resolve(reply ?? {}),
+            (error) => {
+                console.error('[oxichrome] on_auth_required handler failed, so the browser asks the user:', error);
+                resolve({});
+            },
+        ));
+    });
+    if (wrFirefox) {
+        return answer;
+    }
+    answer.then(callback);
+}
+"#;
+
+const WEB_REQUEST_AUTH_CLEANUP: &str = r#"const wrForget = (details) => setTimeout(() => {
+    wrAttempts.delete(details.requestId);
+    wrGaveUp.delete(details.requestId);
+}, 5000);
+chrome.webRequest.onCompleted.addListener(wrForget, { urls: ['<all_urls>'] });
+chrome.webRequest.onErrorOccurred.addListener(wrForget, { urls: ['<all_urls>'] });
+"#;
 
 const ATTACH_HELPER: &str = r#"const attached = new Set();
 
@@ -1193,6 +1463,90 @@ try {{
     )
 }
 
+pub fn generate_devtools_html() -> String {
+    r#"<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+</head>
+<body>
+<script src="devtools.js"></script>
+</body>
+</html>
+"#
+    .to_string()
+}
+
+/// The devtools page: it adds each panel, and tells a panel's page when it's shown or hidden.
+pub fn generate_devtools_js(panels: &[crate::metadata::DevtoolsPanel]) -> String {
+    let list: Vec<serde_json::Value> = panels
+        .iter()
+        .map(|panel| serde_json::json!([panel.title, panel.icon.clone().unwrap_or_default(), panel.page()]))
+        .collect();
+    let list = serde_json::to_string(&list).unwrap_or_else(|_| "[]".into());
+    format!(
+        r#"// Auto-generated by oxichrome. Do not edit.
+const text = (value) => {{
+    const key = /^__MSG_(.+)__$/.exec(value);
+    return key ? (chrome.i18n.getMessage(key[1]) || value) : value;
+}};
+for (const [title, icon, page] of {list}) {{
+    chrome.devtools.panels.create(text(title), icon, page, (panel) => {{
+        let shown = null;
+        panel.onShown.addListener((win) => {{
+            shown = win;
+            win.__oxichromeDevtoolsShown = true;
+            win.dispatchEvent(new Event('oxichrome-devtools-shown'));
+        }});
+        panel.onHidden.addListener(() => {{
+            try {{
+                shown.__oxichromeDevtoolsShown = false;
+                shown.dispatchEvent(new Event('oxichrome-devtools-hidden'));
+            }} catch (_) {{}}
+        }});
+    }});
+}}
+"#
+    )
+}
+
+pub fn generate_devtools_panel_html(panel: &crate::metadata::DevtoolsPanel) -> String {
+    let links: String = panel.styles.iter().map(|style| format!("<link rel=\"stylesheet\" href=\"{style}\">\n")).collect();
+    let script = panel.page().replace(".html", ".js");
+    format!(
+        r#"<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<meta name="color-scheme" content="light dark">
+<style>html, body {{ margin: 0; padding: 0; }}</style>
+{links}</head>
+<body>
+<script type="module" src="{script}"></script>
+</body>
+</html>
+"#
+    )
+}
+
+pub fn generate_devtools_panel_js(crate_name: &str, panel: &crate::metadata::DevtoolsPanel) -> String {
+    let wasm_name = crate_name.replace('-', "_");
+    let export = &panel.export;
+    format!(
+        r#"// Auto-generated by oxichrome. Do not edit.
+import init, {{ {export} }} from './wasm/{wasm_name}.js';
+
+try {{
+    await init();
+    {export}();
+}} catch (e) {{
+    console.error('[oxichrome] Devtools panel init failed:', e);
+    document.body.textContent = 'Error: ' + e.message;
+}}
+"#
+    )
+}
+
 pub fn generate_side_panel_html(styles: &[String]) -> String {
     let links: String = styles.iter().map(|style| format!("<link rel=\"stylesheet\" href=\"{style}\">\n")).collect();
     format!(
@@ -1311,10 +1665,12 @@ mod tests {
             export: "__oxichrome_on_handle_install".to_string(),
                 namespace: "runtime".to_string(),
                 event_name: "on_installed".to_string(),
+                filter: None,
             }],
             has_popup: false,
             has_options_page: false,
             side_panel: None,
+            devtools_panels: Vec::new(),
             omnibox: None,
             popup_styles: Vec::new(),
             options_styles: Vec::new(),
@@ -1365,11 +1721,13 @@ mod tests {
                     export: format!("__oxichrome_on_{fn_name}"),
                     namespace: namespace.to_string(),
                     event_name: event_name.to_string(),
+                    filter: None,
                 })
                 .collect(),
             has_popup: false,
             has_options_page: false,
             side_panel: None,
+            devtools_panels: Vec::new(),
             omnibox: None,
             popup_styles: Vec::new(),
             options_styles: Vec::new(),
@@ -1457,7 +1815,7 @@ mod tests {
         let skip = js[listener..]
             .find("if (isInternalMessage(args[0]))")
             .unwrap();
-        let reply = js[listener..].find("const reply = args[2];").unwrap();
+        let reply = js[listener..].find("const respond = args[2];").unwrap();
         assert!(skip < reply);
     }
 
@@ -1621,6 +1979,34 @@ mod tests {
     }
 
     #[test]
+    fn sessions_changes_come_once() {
+        let metadata = metadata_with_handlers(&[("changed", "sessions", "on_changed")]);
+        let js = generate_background_js(&metadata, "ext");
+        assert!(js.contains("chrome.sessions.onChanged.addListener(() => {"), "{js}");
+        assert!(js.contains("if (sessionsChangePending) {"), "{js}");
+    }
+
+    #[test]
+    fn devtools_pages() {
+        let text = r#"{"kind":"extension","name":"T","version":"1.0.0","description":null,"gecko_id":null,"permissions":[],"host_permissions":[],"icons":[],"action":null}
+{"kind":"devtools_panel","fn_name":"Second","export":"__oxichrome_mount_devtools_Second","title":"__MSG_second__","icon":null,"styles":[],"file":"src/lib.rs","line":20,"column":1}
+{"kind":"devtools_panel","fn_name":"First","export":"__oxichrome_mount_devtools_First","title":"First","icon":"icons/p.png","styles":["p.css"],"file":"src/lib.rs","line":3,"column":1}"#;
+        let metadata = crate::metadata::parse_entries(text).unwrap();
+        let names: Vec<_> = metadata.devtools_panels.iter().map(|panel| panel.fn_name.as_str()).collect();
+        assert_eq!(names, ["First", "Second"], "panels keep the order they're written in");
+        let js = generate_devtools_js(&metadata.devtools_panels);
+        assert!(js.contains(r#"[["First","icons/p.png","devtools-First.html"],["__MSG_second__","","devtools-Second.html"]]"#), "{js}");
+        let first = &metadata.devtools_panels[0];
+        assert!(generate_devtools_panel_html(first).contains("src=\"devtools-First.js\"") && generate_devtools_panel_html(first).contains("href=\"p.css\""));
+        assert!(generate_devtools_panel_js("my-ext", first).contains("import init, { __oxichrome_mount_devtools_First } from './wasm/my_ext.js'"));
+        let twice = text.replace("\"title\":\"__MSG_second__\"", "\"title\":\"First\"");
+        let err = crate::metadata::parse_entries(&twice).unwrap_err().to_string();
+        assert!(err.contains("the same title once spaces are left out"), "{err}");
+        let spaced = text.replace("\"title\":\"__MSG_second__\"", "\"title\":\"Fi rst\"");
+        assert!(crate::metadata::parse_entries(&spaced).is_err(), "Chrome's panel id drops spaces");
+    }
+
+    #[test]
     fn side_panel_background() {
         let source = r#"{"kind":"extension","name":"P","version":"1.0.0","description":null,"gecko_id":null,"permissions":[],"host_permissions":[],"icons":[],"action":null}
 {"kind":"side_panel","fn_name":"Panel","title":null,"open_on_action_click":false}
@@ -1747,5 +2133,87 @@ mod tests {
             assert!(base < first && first < second && second < html.find("</head>").unwrap(), "{html}");
         }
         assert!(!generate_popup_html(&[]).contains("<link"));
+    }
+
+    #[test]
+    fn background_port_wrapper_matches_the_core_one() {
+        let core = include_str!("../../oxichrome-core/src/js_bridge.rs");
+        let start = core.find("const portGroups = new WeakMap();").unwrap();
+        let end = core.find("export function port_name").unwrap();
+        let expected = core[start..end].trim_end().replace("export function port_wrap(raw)", "function wrapPort(raw)");
+        assert_eq!(PORT_WRAPPER.trim_end(), expected);
+    }
+
+    #[test]
+    fn connect_handlers_get_their_own_buffered_port() {
+        let metadata = metadata_with_handlers(&[("a", "runtime", "on_connect"), ("b", "runtime", "on_connect")]);
+        let js = generate_background_js(&metadata, "ext");
+        let listener = js.find("chrome.runtime.onConnect.addListener((raw)").unwrap();
+        assert!(js.find("function wrapPort(raw)").unwrap() < listener);
+        assert!(js[listener..].contains("handlers.map(() => wrapPort(raw))"));
+        assert_eq!(js.matches("function wrapPort").count(), 1);
+    }
+
+    #[test]
+    fn message_replies_are_sent_once() {
+        let metadata = metadata_with_handlers(&[("msg", "runtime", "on_message")]);
+        let js = generate_background_js(&metadata, "ext");
+        assert!(js.contains("if (replied) {"));
+        assert!(js.contains("args[2] = reply;"));
+        assert!(js.contains(".then(() => reply());"));
+    }
+
+    #[test]
+    fn highlighted_sends_each_selection_once() {
+        let metadata = metadata_with_handlers(&[("high", "tabs", "on_highlighted")]);
+        let js = generate_background_js(&metadata, "ext");
+        assert!(js.contains("if (highlightedSeen.get(info.windowId) === key) {"));
+        assert!(js.contains("attach('tabs', () => {"));
+    }
+
+    fn request_handler(fn_name: &str, event_name: &str, filter: Option<crate::metadata::RequestFilter>) -> EventHandler {
+        EventHandler {
+            fn_name: fn_name.to_string(),
+            export: format!("__oxichrome_on_{fn_name}"),
+            namespace: "web_request".to_string(),
+            event_name: event_name.to_string(),
+            filter,
+        }
+    }
+
+    #[test]
+    fn web_request_handlers_get_their_own_filter() {
+        let mut metadata = metadata_with_handlers(&[]);
+        metadata.event_handlers = vec![
+            request_handler("done", "on_completed", Some(crate::metadata::RequestFilter { urls: vec!["https://a.example/*".into()], types: vec!["image".into()] })),
+            request_handler("all", "on_completed", None),
+            request_handler("failed", "on_error_occurred", None),
+        ];
+        let js = generate_background_js(&metadata, "ext");
+        assert!(js.contains(r#"wrListen('onCompleted', {"types":["image"],"urls":["https://a.example/*"]}, (details) => dispatch(() => __oxichrome_on_done(details, details)));"#), "{js}");
+        assert!(js.contains(r#"wrListen('onCompleted', {"urls":["<all_urls>"]}, (details) => dispatch(() => __oxichrome_on_all(details, details)));"#));
+        assert!(js.contains("attach('webRequest', () => {"));
+        assert!(!js.contains("wrForget"));
+    }
+
+    #[test]
+    fn auth_answers_once_per_challenge_and_gives_up() {
+        let mut metadata = metadata_with_handlers(&[]);
+        metadata.event_handlers = vec![request_handler("login", "on_auth_required", None), request_handler("failed", "on_error_occurred", None)];
+        let js = generate_background_js(&metadata, "ext");
+        assert!(js.contains("(details, callback) => wrAnswer(details, callback, __oxichrome_on_login)"));
+        assert!(js.contains("details.__oxichrome_auth_gave_up = wrGaveUp.has(details.requestId);"));
+        assert!(js.contains("const WR_MAX_AUTH_ATTEMPTS = 3;"));
+        assert!(js.contains("chrome.webRequest.onCompleted.addListener(wrForget"));
+    }
+
+    #[test]
+    fn user_script_messages_wait_for_the_permission() {
+        let metadata = metadata_with_handlers(&[("from_script", "runtime", "on_user_script_message")]);
+        let js = generate_background_js(&metadata, "ext");
+        assert!(js.contains("if (listenToUserScripts.done || !globalThis.chrome?.runtime?.onUserScriptMessage) {"));
+        assert!(js.contains("globalThis.chrome?.permissions?.onAdded?.addListener(listenToUserScripts);"));
+        assert!(js.contains("Promise.allSettled([__oxichrome_on_from_script].map"));
+        assert!(!js.contains("chrome.runtime.onUserScriptMessage.addListener((...args) => {\n    if (isInternalMessage"));
     }
 }

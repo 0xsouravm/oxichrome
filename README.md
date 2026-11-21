@@ -44,7 +44,11 @@ cargo oxichrome build --target firefox # Firefox
 
 - Proc macros (`#[extension]`, `#[background]`, `#[on]`, `#[popup]`, `#[options_page]`, `#[side_panel]`, `#[content_script]`, `#[menu]`, `#[submenu]`, `#[command]`) transform your Rust into wasm-bindgen exports
 - Typed bindings to `chrome.storage`, `chrome.tabs`, `chrome.runtime`
-- Leptos for reactive popup, options page and side panel UI
+- Typed messages and ports between the background, pages and content scripts, routed by message type
+- Tabs you can move, duplicate, discard, highlight and capture, and tab groups, the same in Chrome and Firefox
+- Typed web request events with URL and type filters, and answers to login challenges
+- User scripts, with typed messages from them, and a check of what the user still has to allow
+- Leptos for reactive popup, options page, side panel and devtools panel UI
 - `cargo oxichrome build` handles everything: compilation, wasm-bindgen, manifest generation, JS/HTML shim generation, static asset copying, optional wasm-opt
 - **`--target firefox`** generates a Firefox-compatible Manifest V3 extension
 - Separate `dist/chromium/` and `dist/firefox/` output directories
@@ -169,7 +173,7 @@ struct MyExtension;
 
 `permissions` and `optional_permissions` take names from `oxichrome::Permission`, not strings, so a typo or a wrong case is a compile error (with a suggestion), and so is a site pattern like `"<all_urls>"`, which belongs in `host_permissions` (Chrome silently ignores it in `permissions`). Each name is checked against what the two browsers accept, measured in both: a permission a browser only grants at install (Firefox: `Alarms`, `ContextMenus`, `Storage`, `Dns`, `Identity`, `DeclarativeNetRequest` and a few more; Chrome: `Debugger`, `Geolocation`, `Proxy`, `Tts`, `UnlimitedStorage` and a few more) can't be in `optional_permissions`, and one Firefox only grants when asked (`UserScripts`, `TrialMl`) can't be in `permissions`. A permission only one browser has (like `SidePanel` or `TabHide`) is left out of the other browser's manifest, and the build says so. A name can't be in both lists. `ContextMenus` is added for you when you have menu items.
 
-`host_permissions` lists the [match patterns](https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/Match_patterns) your extension can access, and is written to `host_permissions` in the manifest for both Chromium and Firefox. The key is left out of the manifest when the list is empty. Malformed patterns are compile errors.
+`host_permissions` lists the [match patterns](https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/Match_patterns) your extension can access, and is written to `host_permissions` in the manifest for both Chromium and Firefox. The key is left out of the manifest when the list is empty. Malformed patterns are compile errors, and so are patterns with a port: Firefox never matches those and gives no access to the site, while a pattern without a port (`http://localhost/*`) matches every port in both browsers.
 
 `icons` are the extension's icons, by size in pixels. Browsers use them on the extensions page and in stores; the Chrome Web Store needs a 128 pixel icon. `action` sets the toolbar button: `default_title` is its tooltip and `default_icon` takes one path or sizes like `icons`. Without `default_icon` the toolbar uses `icons`. Giving `action` (even `action = {}`) adds the toolbar button when you have no popup or `on_clicked` handler, which `chrome.action` calls need. The popup always comes from `#[oxichrome::popup]`. `shortcut` is a keyboard shortcut that opens the popup, or fires `action::on_clicked` when there's no popup; it follows the same rules as [`#[oxichrome::command]`](#oxichromecommand) shortcuts and counts toward their limit of 4.
 
@@ -204,9 +208,13 @@ async fn start() {
 Registers an async function as a Chrome event listener.
 
 ```rust
+use oxichrome::runtime::{InstallReason, InstalledDetails};
+
 #[oxichrome::on(runtime::on_installed)]
-async fn on_install(details: oxichrome::__private::wasm_bindgen::JsValue) {
-    oxichrome::log!("Installed: {:?}", details);
+async fn on_install(details: InstalledDetails) {
+    if details.reason == InstallReason::Update {
+        oxichrome::log!("Updated from {:?}", details.previous_version);
+    }
 }
 ```
 
@@ -225,12 +233,27 @@ Listeners are registered synchronously when the background script starts, and ev
 
 | Event | Typed arguments |
 |---|---|
+| `runtime::on_installed` | `runtime::InstalledDetails` |
+| `runtime::on_message` | your message type, `runtime::MessageSender`, `runtime::Reply` (see [Messaging](#messaging)) |
+| `runtime::on_connect` | `runtime::Port` |
+| `runtime::on_user_script_message` | your message type, `runtime::MessageSender`, `runtime::Reply` (see [User scripts](#user-scripts)) |
+| `tabs::on_created` | `tabs::Tab` |
+| `tabs::on_updated` | `tab_id: i32`, the change as a `JsValue`, `tabs::Tab` |
+| `tabs::on_activated` | `tabs::Activated` |
+| `tabs::on_removed` | `tab_id: i32, tabs::Removed` |
+| `tabs::on_moved` | `tab_id: i32, tabs::Moved` |
+| `tabs::on_attached` / `on_detached` | `tab_id: i32, tabs::Attached` / `tabs::Detached` |
+| `tabs::on_highlighted` | `tabs::Highlighted` |
+| `tab_groups::on_created` / `on_updated` / `on_moved` / `on_removed` | `tab_groups::Group` |
+| `web_request::*` | `web_request::Request` and one more (see [Web requests](#web-requests)) |
 | `alarms::on_alarm` | `alarms::Alarm` |
 | `notifications::on_clicked` | `id: String` |
 | `notifications::on_closed` | `id: String, by_user: Option<bool>` |
 | `notifications::on_button_clicked` | `id: String, index: u32` |
 
-`#[on(runtime::on_message)]` handlers receive `(message, sender, send_response)`. Call `send_response` to reply, including after an `.await`. If no handler replies, the sender gets an empty response (`null` in Chrome, `undefined` in Firefox) once every handler has finished.
+`InstalledDetails` has `reason` (`Install`, `Update`, `BrowserUpdate`, `SharedModuleUpdate`), `previous_version` for an update, and `temporary`, which is `true` for a temporary add-on in Firefox. `runtime::reload()` counts as an `Update` from the same version.
+
+`runtime::on_message` and `runtime::on_connect` are covered in [Messaging](#messaging).
 
 ### `#[oxichrome::popup]`
 
@@ -315,6 +338,56 @@ async fn opened(panel: side_panel::Panel) {} // panel.window_id
 #[oxichrome::on(side_panel::on_closed)]
 async fn closed(panel: side_panel::Panel) {}
 ```
+
+### `#[oxichrome::devtools_panel(...)]`
+
+Marks a Leptos component as a panel in the browser's developer tools, next to Elements and Console, in Chrome and Firefox. oxichrome writes the devtools page that adds the panels, a page for each one, and `devtools_page` in both manifests. No permission is needed.
+
+```rust
+use oxichrome::devtools::{self, Theme};
+
+#[derive(Deserialize)]
+struct Counts { links: u32, images: u32 }
+
+#[oxichrome::devtools_panel(title = "Page stats", icon = "icons/panel.png", style = "panel.css")]
+fn Stats() -> impl IntoView {
+    let (counts, set_counts) = signal(None::<(u32, u32)>);
+    let refresh = move || {
+        leptos::task::spawn_local(async move {
+            let code = "({ links: document.links.length, images: document.images.length })";
+            if let Ok(c) = devtools::eval::<Counts>(code).await {
+                set_counts.set(Some((c.links, c.images)));
+            }
+        });
+    };
+    let _ = devtools::on_shown(refresh);
+    let _ = devtools::on_navigated(move |_url| refresh());
+    view! {
+        <p>{move || counts.get().map(|(l, i)| format!("{l} links, {i} images"))}</p>
+        <button on:click=move |_| { let _ = devtools::reload(true); }>"Reload"</button>
+    }
+}
+```
+
+| Option | Description |
+|---|---|
+| `title` | Required. The panel's tab label; `t!("key")` works too. Chrome tells panels apart by title with spaces left out, so two panels can't share one. |
+| `icon` | A PNG in `static/`, shown next to the title in Chrome. |
+| `style` | Stylesheets, as for [the other pages](#styling-pages). |
+
+An extension can have several panels; they appear in the order they're written. In a panel page, `devtools` gives you:
+
+| Call | What it does |
+|---|---|
+| `inspected_tab_id()` | The tab these devtools inspect. |
+| `eval::<T>(code)` | Runs code in the page's own world (it sees the page's variables) and reads its last value as `T`. The value travels as JSON so both browsers give the same result: functions and `undefined` inside objects are dropped, and a promise isn't awaited. A throw is an error with its first line, like `the inspected page threw: Error: boom`. |
+| `reload(ignore_cache)` | Reloads the inspected page. |
+| `theme()` | `Theme::Light` or `Theme::Dark`. |
+| `on_shown`, `on_hidden` | The user opened or left this panel. Browsers show a panel before its page has loaded, so `on_shown` also runs right away when the panel is showing. |
+| `on_navigated(url)` | The inspected page went to a new URL. |
+| `on_request_finished(request)` | A request finished while the devtools were open: `url`, `method`, `status`, `mime_type` and `time` in milliseconds. |
+
+Outside a devtools panel these return an error, or `None`. The panel page can message the background like any extension page, with `runtime::request`.
 
 ### `#[oxichrome::omnibox(...)]`
 
@@ -702,6 +775,153 @@ let detected = oxichrome::i18n::detect_language(&page_text).await?; // .is_relia
 
 `Extension::name()` returns the `default_locale` text of a translated name.
 
+## Messaging
+
+The background, extension pages and content scripts talk with messages. Give each kind of message its own type, and the type decides which handler gets it.
+
+```rust
+use oxichrome::runtime::{self, MessageSender};
+
+#[derive(Serialize, Deserialize)]
+#[serde(tag = "kind")]
+enum Ask {
+    Count { word: String },
+    Clear,
+}
+
+#[oxichrome::on(runtime::on_message)]
+async fn ask(ask: Ask, sender: MessageSender) -> u32 {
+    match ask {
+        Ask::Count { word } => word.len() as u32,
+        Ask::Clear => 0,
+    }
+}
+
+// in the popup, an options page, a side panel or a content script
+let n: u32 = runtime::request(&Ask::Count { word: "hello".into() }).await?;
+```
+
+- **The message type routes.** A handler runs only for messages that read as its first argument's type. Others skip it, so several handlers with different types can share `on_message`. Use `JsValue` to see every message.
+- **The return value is the reply.** It can be any `Serialize` type, including `Option` and `Result`. A handler that returns nothing doesn't reply. When several handlers reply, the first one wins, in the background and across pages.
+- **Nobody replied.** When every handler finishes without replying (or panics), the sender gets an empty reply instead of waiting forever. Read it as `Option<T>` to get `None`; reading it as `T` returns an `Err` that says nobody replied.
+- **`MessageSender`** has `url`, `origin`, `tab`, `frame_id`, `document_id` and the extension `id`, the same in both browsers. `is_content_script()` tells a web page apart from your own pages.
+- **`Reply`** as the third argument replies before the handler finishes: `reply.send(&value)?` returns `Ok(false)` when a reply already went out.
+- **Pages and content scripts** answer with `runtime::listen`, which works the same way: messages of another type are left for other listeners, and the return value is the reply. It keeps listening until you call `remove()` on what it returns.
+
+```rust
+// in a content script
+let _ = runtime::listen(|ask: Highlight, _sender: MessageSender| async move {
+    highlight(&ask.word)
+});
+
+// in the background
+let found: usize = oxichrome::tabs::request(tab_id, &Highlight { word: "rust".into() }).await?;
+let in_frame: usize = oxichrome::tabs::request_frame(tab_id, frame_id, &Highlight { word: "rust".into() }).await?;
+```
+
+`runtime::request` reaches the background and every open extension page; `tabs::request` reaches the content scripts in a tab. The background never receives its own messages. When nothing is listening (no content script in that tab, a missing frame, or the background asking itself), the `Err` says so. `runtime::send_message` and `tabs::send_message` still return the raw `JsValue` reply.
+
+**Ports** keep a connection open for a stream of messages:
+
+```rust
+use oxichrome::runtime::Port;
+
+#[oxichrome::on(runtime::on_connect)]
+async fn connected(port: Port) {
+    while let Some(Ok(line)) = port.recv::<String>().await {
+        let _ = port.post(&line.to_uppercase());
+    }
+}
+
+// in a page or content script
+let port = runtime::connect("shout")?;
+port.post("hello")?;
+let answer: Option<oxichrome::Result<String>> = port.recv().await;    // None once the port is closed
+port.disconnect();
+```
+
+`runtime::connect(name)` opens a port to the background and extension pages, and `tabs::connect(tab_id, name, frame_id)` to a tab's content scripts. Pages and content scripts accept ports with `runtime::on_connect(|port| async move { ... })`. Messages sent before the other side starts reading are kept in order. `recv` returns `None` once either side disconnects and every message has been read, and `closed().await` waits for that: `Ok(())` for a normal close, `Err` when nothing was listening. Each `on_connect` handler gets every message. The background can stop while a port is open (Chrome stops an idle service worker, Firefox an idle event page), which closes the port; a new `request` or `connect` starts it again.
+
+## Web requests
+
+`web_request` events report the requests the browser makes to sites the extension has host permission for, typed the same in Chrome and Firefox. They need `WebRequest` in `permissions`. Each handler can filter by URL pattern and resource type; without `urls` it gets every URL the extension can see.
+
+```rust
+use oxichrome::web_request::{self, Auth, AuthChallenge, NetError, Request, Response};
+
+#[oxichrome::on(web_request::on_completed, urls = ["https://api.example.com/*"], types = [XmlHttpRequest])]
+async fn finished(request: Request, response: Response) {
+    // request.id, url, method, kind, tab_id, frame_id, initiator, time
+    // response.status, status_line, headers.get("content-type"), ip, from_cache
+}
+
+#[oxichrome::on(web_request::on_error_occurred)]
+async fn failed(request: Request, error: NetError) {
+    // error.kind: Aborted, ConnectionRefused, NameNotResolved, TimedOut, Blocked, ...
+}
+
+#[oxichrome::on(web_request::on_auth_required, urls = ["https://intranet.example.com/*"])]
+async fn login(request: Request, challenge: AuthChallenge) -> Auth {
+    if challenge.attempt > 1 { Auth::Cancel } else { Auth::credentials("me", "secret") }
+}
+```
+
+| Event | Second argument |
+|---|---|
+| `on_before_request` | `Option<Body>`: `Body::Form` (each field and its values) or `Body::Raw` (bytes) |
+| `on_before_send_headers`, `on_send_headers` | `Headers` sent |
+| `on_headers_received`, `on_response_started`, `on_completed` | `Response` |
+| `on_before_redirect` | `Redirect` (`to`, `status`, `headers`) |
+| `on_error_occurred` | `NetError` (`kind`, and the browser's own `message`) |
+| `on_auth_required` | `AuthChallenge` (`scheme`, `realm`, `host`, `port`, `is_proxy`, `attempt`) |
+
+The first argument is always `Request`; a handler can also take only the `Request`, or nothing. Events come in the order of the table, with `on_before_redirect` followed by a new `on_before_request` for the next URL under the same `request.id`. Every request that starts ends in exactly one `on_completed` or `on_error_occurred`. A stopped background starts again for these events.
+
+The types are `MainFrame`, `SubFrame`, `Stylesheet`, `Script`, `Image`, `Font`, `Object`, `XmlHttpRequest`, `Ping`, `CspReport`, `Media`, `WebSocket` and `Other`; Firefox's finer kinds (`imageset`, `beacon`, `object_subrequest`) count as `Image`, `Ping` and `Object`, both in filters and in `request.kind`. `Headers` include `Set-Cookie` in both browsers (Chrome hides it and a few other headers unless asked, and oxichrome asks); Firefox also lists `Host` among the request headers. `request.initiator` is the origin of the page or extension that made the request (Chrome gives an origin, Firefox a full URL, which oxichrome shortens). `tab_id` is `None` for requests made outside a tab, like the background's.
+
+`on_auth_required` is the one event a handler answers: it returns `Auth::credentials(user, password)`, `Auth::Cancel` or `Auth::Prompt` (the browser asks the user). oxichrome adds the permission each browser needs for it (`webRequestAuthProvider` in Chrome, `webRequestBlocking` in Firefox), and an extension can have only one such handler. Credentials that are refused bring the handler back with `attempt` one higher; after three refusals oxichrome cancels the request (Chrome would retry about 30 times, Firefox forever). A cancel shows up differently: Chrome finishes the request with the server's 401, Firefox fails it, and `on_error_occurred` reports `Aborted` (or `TooManyAuthAttempts` after three refusals). Browsers remember accepted credentials, so later requests to the same place don't ask again.
+
+These events only watch. Blocking or changing requests from a listener works only in Firefox (Chrome ignores what a listener returns), so use [`declarative_net_request`](#chrome-apis) for that in both browsers. Error names differ by browser underneath `NetError::kind`: a request blocked by a rule is `Blocked` in Chrome but `Aborted` in Firefox, which reports both the same way. `web_request::handler_behavior_changed()` clears the browser's cache of what handlers do (Chrome allows 20 calls in 10 minutes).
+
+## User scripts
+
+`user_scripts` registers scripts that come from the user, like the ones a script manager installs, to run on matching pages. It needs `UserScripts` in `optional_permissions` (Firefox grants it only on request), and in Chrome the user must also turn on "Allow User Scripts" on the extension's details page in `chrome://extensions`. `availability()` tells you which step is missing.
+
+```rust
+use oxichrome::user_scripts::{self, Availability, RunAt, UserScript, WorldConfig};
+
+match user_scripts::availability().await {
+    Availability::Ready => {}
+    Availability::NeedsPermission => { /* ask with permissions::request_on_click(Permission::UserScripts, ...) */ }
+    Availability::NeedsUserToggle => { /* Chrome: tell the user to turn on "Allow User Scripts" */ }
+}
+
+user_scripts::configure_world(&WorldConfig { messaging: true, ..Default::default() }).await?;
+user_scripts::register(&[
+    UserScript::new("greeter").matches("https://*.example.com/*").code(source).run_at(RunAt::DocumentStart),
+    UserScript::new("from-file").matches("<all_urls>").exclude_matches("https://bank.example/*").file("scripts/hello.js"),
+    UserScript::new("page").matches("https://example.com/*").main_world().code("window.x = 1"),
+]).await?;
+let all = user_scripts::get_scripts().await?;        // also get(id)
+user_scripts::update(&[changed]).await?;             // replaces the scripts with these ids
+let title: String = user_scripts::execute(tab_id, "document.title").await?.result;
+user_scripts::unregister(&["greeter"]).await?;       // also unregister_all(), reset_world()
+```
+
+A script runs in its own world by default: it can't see the page's variables, and of the extension APIs it has only `chrome.runtime.sendMessage`, once `configure_world` turns messaging on. `main_world()` runs it in the page's world instead. Its messages arrive in `runtime::on_user_script_message`, which works like `on_message`: handlers are chosen by message type, and the return value is the reply.
+
+```rust
+#[derive(Serialize, Deserialize)]
+struct Hello { name: String }
+
+#[oxichrome::on(runtime::on_user_script_message)]
+async fn hello(message: Hello, sender: runtime::MessageSender) -> String {
+    format!("hi {}", message.name)
+}
+```
+
+oxichrome checks scripts before the browser sees them, the same way in both browsers: an id can't be empty or start with `_`, a script needs a `matches` pattern and some code or a file, and the same id can't be given twice. Patterns can't have a port, because Firefox never matches those (`http://localhost/*` already matches every port). Registering an id that exists is an error (use `update`), updating one that doesn't is an error, and `unregister` skips ids that aren't registered. Scripts stay registered when the background stops. Firefox clears them when the extension is reloaded, so register them from `runtime::on_installed` too. `execute` runs code once in a tab's main frame and returns its last value as the type you ask for.
+
 ## Chrome APIs
 
 ```rust
@@ -721,7 +941,23 @@ let tab: Tab = oxichrome::tabs::get(tab_id).await?;
 let tab: Tab = oxichrome::tabs::update(tab_id, &props).await?;
 oxichrome::tabs::remove(tab_id).await?;
 oxichrome::tabs::send_message(tab_id, &msg).await?;
-let tab: oxichrome::tabs::Tab = oxichrome::tabs::get(tab_id).await?; // a typed tab: id, window_id, url, title, active, ...
+let tab: oxichrome::tabs::Tab = oxichrome::tabs::get(tab_id).await?; // a typed tab: id, window_id, url, title, active, group_id, ...
+use oxichrome::tabs::{ImageFormat, Position};
+tabs::reload(tab_id, false).await?;                                   // true bypasses the cache
+let copy: Tab = tabs::duplicate(tab_id).await?;
+let moved: Tab = tabs::move_tab(tab_id, Position::index(0)).await?;
+let moved: Vec<Tab> = tabs::move_tabs(&[a, b], Position::end().in_window(window_id)).await?;
+let window = tabs::highlight(None, &[0, 2]).await?;                    // tab indexes, the first becomes active
+let tab: Tab = tabs::discard(tab_id).await?;                          // unload a background tab to free memory
+let png: String = tabs::capture_visible_tab(None, ImageFormat::Png).await?; // a data: URL; also ImageFormat::Jpeg(quality)
+
+// Tab groups (requires the "tabGroups" permission for tab_groups::*)
+use oxichrome::tab_groups::{self, Color, Query, Update};
+let group_id: i64 = tabs::group(&[a, b]).await?;                      // also add_to_group, group_in_window
+tab_groups::update(group_id, &Update { title: Some("Work".into()), color: Some(Color::Blue), ..Default::default() }).await?;
+let groups = tab_groups::query(&Query { window_id: Some(window_id), ..Default::default() }).await?;
+tab_groups::move_group(group_id, Position::end()).await?;              // also get
+tabs::ungroup(&[a]).await?;                                           // a group whose last tab leaves is removed
 
 // Windows
 use oxichrome::windows::{self, NewWindow, WindowState, WindowUpdate};
@@ -792,6 +1028,14 @@ management::uninstall_self().await?;                                     // righ
 // Most visited sites (requires the "topSites" permission)
 let sites = oxichrome::top_sites::get().await?;                         // Vec<Site>, each with url and title
 
+// Recently closed tabs and windows (requires the "sessions" permission, and "tabs" for their URLs)
+use oxichrome::sessions::{self, Closed, Restored};
+let closed = sessions::recently_closed(10).await?;                     // newest first, up to sessions::MAX_RESULTS (25)
+if let Some(Closed::Tab(tab)) = closed.first() {                       // also Closed::Window, with its tabs
+    let back: Restored = sessions::restore(&tab.session_id).await?;    // Restored::Tab { tab_id, window_id } or Restored::Window
+}
+sessions::restore_latest().await?;                                     // whatever was closed last
+
 // Search with the user's default search engine (requires the "search" permission)
 use oxichrome::search::{self, Where};
 search::query("rust web extensions", Where::NewTab).await?;           // also CurrentTab, NewWindow, Tab(tab_id)
@@ -811,7 +1055,12 @@ let on: Vec<String> = dnr::enabled_rule_sets().await?;               // sorted
 
 // Runtime
 let url = oxichrome::runtime::get_url("icon.png");
-oxichrome::runtime::send_message(&msg).await?;
+let id: String = oxichrome::runtime::id();                            // the gecko id in Firefox
+let manifest: serde_json::Value = oxichrome::runtime::get_manifest();
+let platform = oxichrome::runtime::get_platform_info().await?;        // os: Mac, Windows, Linux, ...; arch: Arm64, X86_64, ...
+oxichrome::runtime::open_options_page().await?;                       // Err when there is no #[oxichrome::options_page]
+oxichrome::runtime::set_uninstall_url("https://example.org/bye").await?; // http or https, at most 1023 characters; "" for none
+oxichrome::runtime::reload();
 
 // Action
 oxichrome::action::set_badge_text("3", None).await?;
@@ -852,7 +1101,17 @@ Notification::basic("icon.png", "Reminder", "Standup")
 
 Values you pass to `storage`, `tabs` and `runtime`, and the values you read back, follow `serde_json`'s rules, so a struct, a `HashMap` (integer keys too) or `serde_json::json!({...})` arrives in the browser as the plain object you'd expect, in both browsers.
 
-A `Window` has `id`, `kind` (`Normal`, `Popup`, ...), `state`, `focused`, `incognito`, the bounds, `title` (Firefox only) and, from the `_with_tabs` functions, `tabs`. Browsers refuse some combinations with a vague "Invalid value for state", so these return `InvalidArgument` before reaching the browser: a size or position together with `Minimized`, `Maximized` or `Fullscreen`; `focused(true)` with `Minimized`; `focused(false)` with `Maximized` or `Fullscreen`; a `javascript:` URL; both `tab` and `url`; and an empty update. Creating an `incognito()` window that the user hasn't allowed the extension into returns `Err` in both browsers (Chrome would hand back nothing). `title_preface` is Firefox only, and Chrome builds drop it. Firefox refuses `about:`, `chrome:` and `file:` URLs; Chrome opens them.
+Tabs need no permission to reload, duplicate, move, highlight, discard or group them; reading a tab's `url` and `title` needs `Tabs` or host permission. Chrome and Firefox differ in several places, and oxichrome returns the same thing in both. A missing tab is `InvalidArgument("no tab with id N")`. `move_tabs` always returns a `Vec` and `move_tab` one `Tab`. `discard` refuses the active tab (Chrome would unload it, Firefox ignores the call), returns the tab, and is fine on a tab that is already discarded; a discarded tab's `status` is `"unloaded"` in both. `capture_visible_tab` needs `ActiveTab` (after the user invokes the extension) or host permission for the page. It asks for the format you name (the defaults differ), and since Chrome allows two captures a second, extra calls wait their turn instead of failing. `on_highlighted` fires once per change of selection (Chrome repeats it after moves). Group ids are `i64`, since Firefox's are larger than an `i32`. `tabs::group` and `tabs::ungroup` work without `TabGroups`; `tab_groups::*` and its events need it. Grouping a pinned tab unpins it.
+
+```rust
+#[oxichrome::on(tabs::on_moved)]
+async fn moved(tab_id: i32, info: tabs::Moved) {}               // window_id, from_index, to_index
+
+#[oxichrome::on(tab_groups::on_updated)]
+async fn group_changed(group: tab_groups::Group) {}             // id, title, color, collapsed, window_id
+```
+
+A `Window` has `id`, `kind` (`Normal`, `Popup`, ...), `state`, `focused`, `incognito`, the bounds, `title` (Firefox only) and, from the `_with_tabs` functions, `tabs`. Browsers refuse some combinations with a vague "Invalid value for state", so these return `InvalidArgument` before reaching the browser: a size or position together with `Minimized`, `Maximized` or `Fullscreen`; `focused(true)` with `Minimized`; `focused(false)` with `Maximized` or `Fullscreen`; a `javascript:` URL; both `tab` and `url`; and an empty update. Firefox can't open a window in the background, so `focused(false)` is left out there and the window opens focused. Creating an `incognito()` window that the user hasn't allowed the extension into returns `Err` in both browsers (Chrome would hand back nothing). `title_preface` is Firefox only, and Chrome builds drop it. Firefox refuses `about:`, `chrome:` and `file:` URLs; Chrome opens them.
 
 ```rust
 #[oxichrome::on(windows::on_created)]
@@ -1004,6 +1263,8 @@ fn Options() -> impl IntoView {
 ```
 
 `top_sites::get` lists the user's most visited sites, one page per site in both browsers, most visited first. Each browser picks which page stands for a site and how many to list, and a new profile can start with the browser's own suggestions (Chrome lists its Web Store). Search shortcuts and duplicates are left out, and a page without a title has an empty `title`.
+
+`sessions::recently_closed` reads the same in both browsers: `closed_at` is in milliseconds (Chrome reports seconds), a closed window lists its tabs in order without session ids of their own (Firefox has none, so the window comes back whole), and without `Tabs` a tab's `url` and `title` are `None`. `restore` gives back the new tab or window ids; the tabs may still be loading, so read their URL with `tabs::get` once they have. Restoring an id twice, a made up id, or `restore_latest` with nothing closed is an `InvalidArgument` with the same message in both. `#[oxichrome::on(sessions::on_changed)] async fn changed() {}` runs once per change: Chrome fires twice when something is restored, and oxichrome passes one on.
 
 `search::query` searches with whatever engine the user picked, in the place you name. `Where::CurrentTab` is the tab the user is looking at in the current window, the same in both browsers (Chrome would otherwise replace the extension page that made the call). Blank text is an error (Chrome refuses empty text, Firefox would search for nothing), and so is a tab that doesn't exist. Neither browser lets an extension choose the engine in both, so oxichrome doesn't.
 

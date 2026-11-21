@@ -148,8 +148,8 @@ async fn reading_pill() {
         return;
     }
     let reading = Reading { minutes: words.div_ceil(WORDS_PER_MINUTE), words };
-    let reply = oxichrome::runtime::send_message(&reading).await.ok();
-    let show = reply.and_then(|reply| serde_wasm_bindgen::from_value::<ReadingReply>(reply).ok()).is_some_and(|reply| reply.show_pill);
+    let reply: Option<ReadingReply> = oxichrome::runtime::request(&reading).await.ok();
+    let show = reply.is_some_and(|reply| reply.show_pill);
     if !show || document.get_element_by_id("page-lens-pill").is_some() {
         return;
     }
