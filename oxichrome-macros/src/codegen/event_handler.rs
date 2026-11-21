@@ -85,7 +85,7 @@ pub fn expand(attr: TokenStream, item: TokenStream, order: crate::codegen::Order
 
     let js_type = quote! { oxichrome::__private::wasm_bindgen::JsValue };
 
-    let is_message = namespace == "runtime" && event_name == "on_message";
+    let is_message = namespace == "runtime" && (event_name == "on_message" || event_name == "on_user_script_message");
     let replies = is_message
         && match &func.sig.output {
             syn::ReturnType::Default => false,

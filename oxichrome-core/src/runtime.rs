@@ -149,6 +149,7 @@ impl FromEventArg for MessageSender {
 }
 
 impl EventArg<events::RuntimeOnMessage, 2> for MessageSender {}
+impl EventArg<events::RuntimeOnUserScriptMessage, 2> for MessageSender {}
 
 /// The reply channel `runtime::on_message` passes as its third argument.
 ///
@@ -180,6 +181,7 @@ impl FromEventArg for Reply {
 }
 
 impl EventArg<events::RuntimeOnMessage, 3> for Reply {}
+impl EventArg<events::RuntimeOnUserScriptMessage, 3> for Reply {}
 
 #[doc(hidden)]
 pub fn __reply<R: Serialize>(reply: &JsValue, value: &R) -> std::result::Result<(), JsValue> {
@@ -191,7 +193,7 @@ pub fn __reply<R: Serialize>(reply: &JsValue, value: &R) -> std::result::Result<
 
 #[doc(hidden)]
 #[diagnostic::on_unimplemented(
-    message = "`{Self}` can't be the message of a `runtime::on_message` handler",
+    message = "`{Self}` can't be the message of a message handler",
     label = "the message must implement `Deserialize` and own its data",
     note = "derive `serde::Deserialize` on your message type (use `String`, not `&str`), or take `JsValue` to see every message"
 )]

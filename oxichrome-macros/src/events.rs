@@ -1,5 +1,5 @@
 pub const EVENTS: &[(&str, &[&str])] = &[
-    ("runtime", &["on_installed", "on_message", "on_connect"]),
+    ("runtime", &["on_installed", "on_message", "on_connect", "on_user_script_message"]),
     ("storage", &["on_changed"]),
     ("tabs", &["on_updated", "on_removed", "on_activated", "on_created", "on_moved", "on_attached", "on_detached", "on_highlighted"]),
     ("tab_groups", &["on_created", "on_updated", "on_removed", "on_moved"]),

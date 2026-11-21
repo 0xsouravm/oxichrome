@@ -457,6 +457,51 @@ self.addEventListener('unhandledrejection', (event) => releaseRepliesOnTrap(even
 }});
 "#
             ));
+        } else if event == "chrome.runtime.onUserScriptMessage" {
+            listeners.push_str(&format!(
+                r#"const openUserScriptReplies = new Set();
+
+function releaseUserScriptRepliesOnTrap(error) {{
+    if (error instanceof WebAssembly.RuntimeError) {{
+        openUserScriptReplies.forEach((reply) => reply());
+        openUserScriptReplies.clear();
+    }}
+}}
+
+self.addEventListener('error', (event) => releaseUserScriptRepliesOnTrap(event.error));
+self.addEventListener('unhandledrejection', (event) => releaseUserScriptRepliesOnTrap(event.reason));
+
+function listenToUserScripts() {{
+    if (listenToUserScripts.done || !globalThis.chrome?.runtime?.onUserScriptMessage) {{
+        return;
+    }}
+    listenToUserScripts.done = true;
+    chrome.runtime.onUserScriptMessage.addListener((...args) => {{
+        const respond = args[2];
+        let replied = false;
+        const reply = (value) => {{
+            if (replied) {{
+                return false;
+            }}
+            replied = true;
+            openUserScriptReplies.delete(reply);
+            respond(value);
+            return true;
+        }};
+        args[2] = reply;
+        openUserScriptReplies.add(reply);
+        dispatch(() => {{
+            Promise.allSettled([{handlers}].map(async (handler) => handler(...args)))
+                .then(() => reply());
+        }});
+        return true;
+    }});
+}}
+
+listenToUserScripts();
+globalThis.chrome?.permissions?.onAdded?.addListener(listenToUserScripts);
+"#
+            ));
         } else if event == "chrome.runtime.onConnect" {
             listeners.push_str(PORT_WRAPPER);
             listeners.push_str(&format!(
@@ -2030,4 +2075,13 @@ mod tests {
         assert!(js.contains("chrome.webRequest.onCompleted.addListener(wrForget"));
     }
 
+    #[test]
+    fn user_script_messages_wait_for_the_permission() {
+        let metadata = metadata_with_handlers(&[("from_script", "runtime", "on_user_script_message")]);
+        let js = generate_background_js(&metadata, "ext");
+        assert!(js.contains("if (listenToUserScripts.done || !globalThis.chrome?.runtime?.onUserScriptMessage) {"));
+        assert!(js.contains("globalThis.chrome?.permissions?.onAdded?.addListener(listenToUserScripts);"));
+        assert!(js.contains("Promise.allSettled([__oxichrome_on_from_script].map"));
+        assert!(!js.contains("chrome.runtime.onUserScriptMessage.addListener((...args) => {\n    if (isInternalMessage"));
+    }
 }

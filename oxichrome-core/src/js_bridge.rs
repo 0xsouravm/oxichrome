@@ -1761,3 +1761,36 @@ extern "C" {
     #[wasm_bindgen(catch)]
     pub fn web_request_handler_behavior_changed() -> Result<js_sys::Promise, JsValue>;
 }
+
+#[wasm_bindgen]
+extern "C" {
+    #[wasm_bindgen(js_namespace = ["chrome", "runtime", "onUserScriptMessage"], js_name = addListener)]
+    pub fn chrome_runtime_on_user_script_message_add_listener(callback: &Closure<dyn FnMut(JsValue, JsValue, JsValue)>);
+}
+
+#[wasm_bindgen(inline_js = r#"
+export function user_scripts_state() {
+    if (globalThis.chrome?.userScripts) {
+        return Promise.resolve('ready');
+    }
+    if (typeof globalThis.chrome?.permissions?.contains !== 'function') {
+        return Promise.resolve('permission');
+    }
+    return chrome.permissions.contains({ permissions: ['userScripts'] }).then((has) => (has ? 'toggle' : 'permission'), () => 'permission');
+}
+
+export function user_scripts_call(method, args) {
+    const api = globalThis.chrome?.userScripts;
+    if (!api) {
+        return user_scripts_state().then((state) => {
+            throw new Error(state === 'toggle' ? 'oxichrome:needs-toggle' : 'oxichrome:needs-permission');
+        });
+    }
+    return Promise.resolve(api[method](...args));
+}
+"#)]
+extern "C" {
+    pub fn user_scripts_state() -> js_sys::Promise;
+    #[wasm_bindgen(catch)]
+    pub fn user_scripts_call(method: &str, args: &js_sys::Array) -> Result<js_sys::Promise, JsValue>;
+}

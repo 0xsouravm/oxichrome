@@ -47,6 +47,7 @@ cargo oxichrome build --target firefox # Firefox
 - Typed messages and ports between the background, pages and content scripts, routed by message type
 - Tabs you can move, duplicate, discard, highlight and capture, and tab groups, the same in Chrome and Firefox
 - Typed web request events with URL and type filters, and answers to login challenges
+- User scripts, with typed messages from them, and a check of what the user still has to allow
 - Leptos for reactive popup, options page and side panel UI
 - `cargo oxichrome build` handles everything: compilation, wasm-bindgen, manifest generation, JS/HTML shim generation, static asset copying, optional wasm-opt
 - **`--target firefox`** generates a Firefox-compatible Manifest V3 extension
@@ -232,6 +233,7 @@ Listeners are registered synchronously when the background script starts, and ev
 | `runtime::on_installed` | `runtime::InstalledDetails` |
 | `runtime::on_message` | your message type, `runtime::MessageSender`, `runtime::Reply` (see [Messaging](#messaging)) |
 | `runtime::on_connect` | `runtime::Port` |
+| `runtime::on_user_script_message` | your message type, `runtime::MessageSender`, `runtime::Reply` (see [User scripts](#user-scripts)) |
 | `tabs::on_created` | `tabs::Tab` |
 | `tabs::on_updated` | `tab_id: i32`, the change as a `JsValue`, `tabs::Tab` |
 | `tabs::on_activated` | `tabs::Activated` |
@@ -827,6 +829,45 @@ The types are `MainFrame`, `SubFrame`, `Stylesheet`, `Script`, `Image`, `Font`, 
 `on_auth_required` is the one event a handler answers: it returns `Auth::credentials(user, password)`, `Auth::Cancel` or `Auth::Prompt` (the browser asks the user). oxichrome adds the permission each browser needs for it (`webRequestAuthProvider` in Chrome, `webRequestBlocking` in Firefox), and an extension can have only one such handler. Credentials that are refused bring the handler back with `attempt` one higher; after three refusals oxichrome cancels the request (Chrome would retry about 30 times, Firefox forever). A cancel shows up differently: Chrome finishes the request with the server's 401, Firefox fails it, and `on_error_occurred` reports `Aborted` (or `TooManyAuthAttempts` after three refusals). Browsers remember accepted credentials, so later requests to the same place don't ask again.
 
 These events only watch. Blocking or changing requests from a listener works only in Firefox (Chrome ignores what a listener returns), so use [`declarative_net_request`](#chrome-apis) for that in both browsers. Error names differ by browser underneath `NetError::kind`: a request blocked by a rule is `Blocked` in Chrome but `Aborted` in Firefox, which reports both the same way. `web_request::handler_behavior_changed()` clears the browser's cache of what handlers do (Chrome allows 20 calls in 10 minutes).
+
+## User scripts
+
+`user_scripts` registers scripts that come from the user, like the ones a script manager installs, to run on matching pages. It needs `UserScripts` in `optional_permissions` (Firefox grants it only on request), and in Chrome the user must also turn on "Allow User Scripts" on the extension's details page in `chrome://extensions`. `availability()` tells you which step is missing.
+
+```rust
+use oxichrome::user_scripts::{self, Availability, RunAt, UserScript, WorldConfig};
+
+match user_scripts::availability().await {
+    Availability::Ready => {}
+    Availability::NeedsPermission => { /* ask with permissions::request_on_click(Permission::UserScripts, ...) */ }
+    Availability::NeedsUserToggle => { /* Chrome: tell the user to turn on "Allow User Scripts" */ }
+}
+
+user_scripts::configure_world(&WorldConfig { messaging: true, ..Default::default() }).await?;
+user_scripts::register(&[
+    UserScript::new("greeter").matches("https://*.example.com/*").code(source).run_at(RunAt::DocumentStart),
+    UserScript::new("from-file").matches("<all_urls>").exclude_matches("https://bank.example/*").file("scripts/hello.js"),
+    UserScript::new("page").matches("https://example.com/*").main_world().code("window.x = 1"),
+]).await?;
+let all = user_scripts::get_scripts().await?;        // also get(id)
+user_scripts::update(&[changed]).await?;             // replaces the scripts with these ids
+let title: String = user_scripts::execute(tab_id, "document.title").await?.result;
+user_scripts::unregister(&["greeter"]).await?;       // also unregister_all(), reset_world()
+```
+
+A script runs in its own world by default: it can't see the page's variables, and of the extension APIs it has only `chrome.runtime.sendMessage`, once `configure_world` turns messaging on. `main_world()` runs it in the page's world instead. Its messages arrive in `runtime::on_user_script_message`, which works like `on_message`: handlers are chosen by message type, and the return value is the reply.
+
+```rust
+#[derive(Serialize, Deserialize)]
+struct Hello { name: String }
+
+#[oxichrome::on(runtime::on_user_script_message)]
+async fn hello(message: Hello, sender: runtime::MessageSender) -> String {
+    format!("hi {}", message.name)
+}
+```
+
+oxichrome checks scripts before the browser sees them, the same way in both browsers: an id can't be empty or start with `_`, a script needs a `matches` pattern and some code or a file, and the same id can't be given twice. Patterns can't have a port, because Firefox never matches those (`http://localhost/*` already matches every port). Registering an id that exists is an error (use `update`), updating one that doesn't is an error, and `unregister` skips ids that aren't registered. Scripts stay registered when the background stops. Firefox clears them when the extension is reloaded, so register them from `runtime::on_installed` too. `execute` runs code once in a tab's main frame and returns its last value as the type you ask for.
 
 ## Chrome APIs
 

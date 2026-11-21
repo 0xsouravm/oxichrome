@@ -87,6 +87,7 @@ pub mod events {
     pub struct RuntimeOnInstalled;
     pub struct RuntimeOnMessage;
     pub struct RuntimeOnConnect;
+    pub struct RuntimeOnUserScriptMessage;
     pub struct StorageOnChanged;
     pub struct TabsOnUpdated;
     pub struct TabsOnRemoved;
@@ -162,6 +163,7 @@ arity! {
     RuntimeOnInstalled = 1,
     RuntimeOnMessage = 3,
     RuntimeOnConnect = 1,
+    RuntimeOnUserScriptMessage = 3,
     StorageOnChanged = 2,
     TabsOnUpdated = 3,
     TabsOnRemoved = 2,

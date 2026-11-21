@@ -558,6 +558,11 @@ fn check_event_permissions(metadata: &ExtensionMetadata) -> anyhow::Result<()> {
     check_event_permission(metadata, "bookmarks", "bookmarks", "Bookmarks")?;
     check_event_permission(metadata, "history", "history", "History")?;
     check_web_request(metadata)?;
+    if let Some(handler) = metadata.event_handlers.iter().find(|handler| handler.namespace == "runtime" && handler.event_name == "on_user_script_message") {
+        if !metadata.optional_permissions.iter().any(|listed| listed == "userScripts") {
+            bail!("`{}` listens to `runtime::on_user_script_message`; add `UserScripts` to `optional_permissions` in #[oxichrome::extension]", handler.fn_name);
+        }
+    }
     Ok(())
 }
 
