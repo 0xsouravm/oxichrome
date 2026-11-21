@@ -86,10 +86,30 @@ pub trait Event {
 pub mod events {
     pub struct RuntimeOnInstalled;
     pub struct RuntimeOnMessage;
+    pub struct RuntimeOnConnect;
+    pub struct RuntimeOnUserScriptMessage;
     pub struct StorageOnChanged;
     pub struct TabsOnUpdated;
     pub struct TabsOnRemoved;
     pub struct TabsOnActivated;
+    pub struct WebRequestOnBeforeRequest;
+    pub struct WebRequestOnBeforeSendHeaders;
+    pub struct WebRequestOnSendHeaders;
+    pub struct WebRequestOnHeadersReceived;
+    pub struct WebRequestOnResponseStarted;
+    pub struct WebRequestOnBeforeRedirect;
+    pub struct WebRequestOnCompleted;
+    pub struct WebRequestOnErrorOccurred;
+    pub struct WebRequestOnAuthRequired;
+    pub struct TabsOnCreated;
+    pub struct TabsOnMoved;
+    pub struct TabsOnAttached;
+    pub struct TabsOnDetached;
+    pub struct TabsOnHighlighted;
+    pub struct TabGroupsOnCreated;
+    pub struct TabGroupsOnUpdated;
+    pub struct TabGroupsOnRemoved;
+    pub struct TabGroupsOnMoved;
     pub struct ActionOnClicked;
     pub struct AlarmsOnAlarm;
     pub struct NotificationsOnClicked;
@@ -129,6 +149,7 @@ pub mod events {
     pub struct BookmarksOnMoved;
     pub struct HistoryOnVisited;
     pub struct HistoryOnVisitRemoved;
+    pub struct SessionsOnChanged;
 }
 
 macro_rules! arity {
@@ -142,10 +163,30 @@ macro_rules! arity {
 arity! {
     RuntimeOnInstalled = 1,
     RuntimeOnMessage = 3,
+    RuntimeOnConnect = 1,
+    RuntimeOnUserScriptMessage = 3,
     StorageOnChanged = 2,
     TabsOnUpdated = 3,
     TabsOnRemoved = 2,
     TabsOnActivated = 1,
+    WebRequestOnBeforeRequest = 2,
+    WebRequestOnBeforeSendHeaders = 2,
+    WebRequestOnSendHeaders = 2,
+    WebRequestOnHeadersReceived = 2,
+    WebRequestOnResponseStarted = 2,
+    WebRequestOnBeforeRedirect = 2,
+    WebRequestOnCompleted = 2,
+    WebRequestOnErrorOccurred = 2,
+    WebRequestOnAuthRequired = 2,
+    TabsOnCreated = 1,
+    TabsOnMoved = 2,
+    TabsOnAttached = 2,
+    TabsOnDetached = 2,
+    TabsOnHighlighted = 1,
+    TabGroupsOnCreated = 1,
+    TabGroupsOnUpdated = 1,
+    TabGroupsOnRemoved = 1,
+    TabGroupsOnMoved = 1,
     ActionOnClicked = 1,
     AlarmsOnAlarm = 1,
     NotificationsOnClicked = 1,
@@ -185,6 +226,7 @@ arity! {
     BookmarksOnMoved = 1,
     HistoryOnVisited = 1,
     HistoryOnVisitRemoved = 1,
+    SessionsOnChanged = 0,
 }
 
 impl EventArg<events::NotificationsOnClicked, 1> for String {}

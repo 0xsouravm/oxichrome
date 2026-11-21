@@ -1,7 +1,9 @@
 pub const EVENTS: &[(&str, &[&str])] = &[
-    ("runtime", &["on_installed", "on_message"]),
+    ("runtime", &["on_installed", "on_message", "on_connect", "on_user_script_message"]),
     ("storage", &["on_changed"]),
-    ("tabs", &["on_updated", "on_removed", "on_activated"]),
+    ("tabs", &["on_updated", "on_removed", "on_activated", "on_created", "on_moved", "on_attached", "on_detached", "on_highlighted"]),
+    ("tab_groups", &["on_created", "on_updated", "on_removed", "on_moved"]),
+    ("web_request", &["on_before_request", "on_before_send_headers", "on_send_headers", "on_headers_received", "on_response_started", "on_before_redirect", "on_completed", "on_error_occurred", "on_auth_required"]),
     ("action", &["on_clicked"]),
     ("alarms", &["on_alarm"]),
     ("notifications", &["on_clicked", "on_closed", "on_button_clicked"]),
@@ -30,6 +32,7 @@ pub const EVENTS: &[(&str, &[&str])] = &[
     ),
     ("bookmarks", &["on_created", "on_removed", "on_changed", "on_moved"]),
     ("history", &["on_visited", "on_visit_removed"]),
+    ("sessions", &["on_changed"]),
 ];
 
 fn distance(a: &str, b: &str) -> usize {

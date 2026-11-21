@@ -5,6 +5,7 @@ pub mod page;
 pub mod popup;
 pub mod options_page;
 pub mod side_panel;
+pub mod devtools_panel;
 pub mod omnibox;
 pub mod content_script;
 pub mod offscreen;

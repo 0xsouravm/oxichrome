@@ -157,6 +157,18 @@ pub fn run(release: bool, browser: Browser) -> Result<()> {
         println!("[oxichrome] Generated sidepanel.html + sidepanel.js");
     }
 
+    if !metadata.devtools_panels.is_empty() {
+        fs::write(dist_dir.join("devtools.html"), shims::generate_devtools_html()).context("failed to write devtools.html")?;
+        fs::write(dist_dir.join("devtools.js"), shims::generate_devtools_js(&metadata.devtools_panels)).context("failed to write devtools.js")?;
+        for panel in &metadata.devtools_panels {
+            let page = panel.page();
+            fs::write(dist_dir.join(&page), shims::generate_devtools_panel_html(panel)).with_context(|| format!("failed to write {page}"))?;
+            let script = page.replace(".html", ".js");
+            fs::write(dist_dir.join(&script), shims::generate_devtools_panel_js(&crate_name, panel)).with_context(|| format!("failed to write {script}"))?;
+        }
+        println!("[oxichrome] Generated devtools.html + {} devtools panel page(s)", metadata.devtools_panels.len());
+    }
+
     if metadata.has_options_page {
         let options_html = shims::generate_options_html(&metadata.options_styles);
         fs::write(dist_dir.join("options.html"), &options_html)

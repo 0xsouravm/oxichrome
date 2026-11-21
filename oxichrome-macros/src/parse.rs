@@ -97,6 +97,9 @@ fn validate_match_pattern(pattern: &LitStr, kind: &str) -> syn::Result<()> {
         if !digits || port.parse::<u16>().is_err() {
             return fail(&format!("invalid port `{port}`"));
         }
+        return fail(&format!(
+            "Firefox never matches a pattern with a port, so it would give no access there; leave `:{port}` out (a pattern without a port matches every port)"
+        ));
     }
 
     Ok(())
@@ -763,21 +766,98 @@ fn check_resource_path(path: &LitStr, what: &str) -> syn::Result<()> {
 pub struct EventArgs {
     pub namespace: Ident,
     pub event_name: Ident,
+    /// `urls = [...]` and `types = [...]`, for `web_request` events.
+    pub filter: Option<RequestFilter>,
+}
+
+#[derive(Debug)]
+pub struct RequestFilter {
+    pub span: proc_macro2::Span,
+    pub urls: Vec<LitStr>,
+    pub types: Vec<String>,
+}
+
+pub const RESOURCE_TYPES: &[(&str, &str)] = &[
+    ("MainFrame", "main_frame"),
+    ("SubFrame", "sub_frame"),
+    ("Stylesheet", "stylesheet"),
+    ("Script", "script"),
+    ("Image", "image"),
+    ("Font", "font"),
+    ("Object", "object"),
+    ("XmlHttpRequest", "xmlhttprequest"),
+    ("Ping", "ping"),
+    ("CspReport", "csp_report"),
+    ("Media", "media"),
+    ("WebSocket", "websocket"),
+    ("Other", "other"),
+];
+
+impl Parse for RequestFilter {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        let span = input.span();
+        let mut urls: Option<Vec<LitStr>> = None;
+        let mut types: Option<Vec<String>> = None;
+        while !input.is_empty() {
+            let key: Ident = input.parse()?;
+            input.parse::<Token![=]>()?;
+            let content;
+            syn::bracketed!(content in input);
+            match key.to_string().as_str() {
+                "urls" if urls.is_none() => {
+                    let list: Vec<LitStr> = content.parse_terminated(<LitStr as Parse>::parse, Token![,])?.into_iter().collect();
+                    if list.is_empty() {
+                        return Err(syn::Error::new(key.span(), "`urls` needs at least one pattern; leave it out to watch every URL the extension has host permission for"));
+                    }
+                    for url in &list {
+                        validate_match_pattern(url, "URL filter")?;
+                    }
+                    urls = Some(list);
+                }
+                "types" if types.is_none() => {
+                    let list: Vec<Ident> = content.parse_terminated(Ident::parse, Token![,])?.into_iter().collect();
+                    if list.is_empty() {
+                        return Err(syn::Error::new(key.span(), "`types` needs at least one type; leave it out to watch every type"));
+                    }
+                    let mut names = Vec::new();
+                    for ty in &list {
+                        match RESOURCE_TYPES.iter().find(|(variant, _)| ty == variant) {
+                            Some((_, name)) => names.push(name.to_string()),
+                            None => {
+                                let all: Vec<String> = RESOURCE_TYPES.iter().map(|(variant, _)| format!("`{variant}`")).collect();
+                                return Err(syn::Error::new(ty.span(), format!("`{ty}` isn't a resource type; use {}", all.join(", "))));
+                            }
+                        }
+                    }
+                    types = Some(names);
+                }
+                "urls" | "types" => return Err(syn::Error::new(key.span(), format!("`{key}` is given twice"))),
+                other => return Err(syn::Error::new(key.span(), format!("unknown filter `{other}`; a request filter takes `urls = [...]` and `types = [...]`"))),
+            }
+            if !input.is_empty() {
+                input.parse::<Token![,]>()?;
+            }
+        }
+        Ok(RequestFilter { span, urls: urls.unwrap_or_default(), types: types.unwrap_or_default() })
+    }
 }
 
 impl Parse for EventArgs {
     fn parse(input: ParseStream) -> syn::Result<Self> {
         let path: syn::Path = input.parse()?;
-        if !input.is_empty() {
-            return Err(input.error("expected only the event, like `#[oxichrome::on(tabs::on_updated)]`"));
-        }
+        let filter = if input.is_empty() {
+            None
+        } else {
+            input.parse::<Token![,]>().map_err(|_| input.error("expected only the event, like `#[oxichrome::on(tabs::on_updated)]`"))?;
+            Some(input.parse::<RequestFilter>()?)
+        };
         let mut names: Vec<Ident> = path.segments.iter().map(|segment| segment.ident.clone()).collect();
         if names.len() == 3 && names[0] == "oxichrome" {
             names.remove(0);
         }
         let wrong = path.leading_colon.is_some() || path.segments.iter().any(|segment| !segment.arguments.is_none());
         match <[Ident; 2]>::try_from(names) {
-            Ok([namespace, event_name]) if !wrong => Ok(EventArgs { namespace, event_name }),
+            Ok([namespace, event_name]) if !wrong => Ok(EventArgs { namespace, event_name, filter }),
             _ => Err(syn::Error::new_spanned(
                 &path,
                 "name the event as `module::event`, like `#[oxichrome::on(tabs::on_updated)]` or `#[oxichrome::on(oxichrome::tabs::on_updated)]`",
@@ -1267,11 +1347,7 @@ mod tests {
             "file:///C:/*",
             "file://somehost/path",
             "file://*/*",
-            "http://127.0.0.1:8080/*",
-            "http://a.com:0/*",
-            "http://a.com:65535/*",
             "https://[::1]/*",
-            "https://[::1]:8080/*",
             "https://*/",
             "https://a.com/p?q=1",
         ];
@@ -1319,6 +1395,11 @@ mod tests {
             ("wss://example.org/*", "Firefox only"),
             ("HTTPS://a.com/*", "uppercase scheme"),
             ("urn:*", "unsupported scheme"),
+            ("http://localhost:8080/*", "a port Firefox never matches"),
+            ("http://127.0.0.1:8080/*", "a port Firefox never matches"),
+            ("http://a.com:0/*", "a port Firefox never matches"),
+            ("http://a.com:65535/*", "a port Firefox never matches"),
+            ("https://[::1]:443/*", "a port after IPv6"),
         ];
 
         for (pattern, _reason) in invalid_patterns {
@@ -1524,7 +1605,7 @@ mod tests {
 
     #[test]
     fn parse_content_script_args_checks_the_whole_pattern() {
-        for pattern in ["file:///*", "https://[::1]:8080/*", "*://*.example.org/*"] {
+        for pattern in ["file:///*", "https://[::1]/*", "*://*.example.org/*"] {
             let tokens = quote::quote! { matches = [#pattern] };
             assert!(
                 syn::parse2::<ContentScriptArgs>(tokens).is_ok(),
@@ -1536,6 +1617,7 @@ mod tests {
             "https://mozilla.org",
             "https://*.*/*",
             "ws://a.org/*",
+            "https://[::1]:8080/*",
         ] {
             let tokens = quote::quote! { matches = [#pattern] };
             let err = syn::parse2::<ContentScriptArgs>(tokens).expect_err(pattern);

@@ -26,6 +26,7 @@ pub struct ExtensionMetadata {
     pub popup_styles: Vec<String>,
     pub options_styles: Vec<String>,
     pub side_panel: Option<SidePanel>,
+    pub devtools_panels: Vec<DevtoolsPanel>,
     pub omnibox: Option<Omnibox>,
     pub content_scripts: Vec<ContentScript>,
     pub gecko_id: Option<String>,
@@ -63,6 +64,23 @@ pub struct Omnibox {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+pub struct DevtoolsPanel {
+    pub fn_name: String,
+    pub export: String,
+    pub title: String,
+    pub icon: Option<String>,
+    #[serde(default)]
+    pub styles: Vec<String>,
+}
+
+impl DevtoolsPanel {
+    /// The panel's page in the extension, like `devtools-Panel.html`.
+    pub fn page(&self) -> String {
+        format!("devtools-{}.html", self.fn_name)
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq)]
 pub struct SidePanel {
     pub title: Option<String>,
     #[serde(default)]
@@ -153,6 +171,16 @@ pub struct EventHandler {
     pub export: String,
     pub namespace: String,
     pub event_name: String,
+    /// The URL and type filter of a `web_request` handler.
+    #[serde(default)]
+    pub filter: Option<RequestFilter>,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+pub struct RequestFilter {
+    pub urls: Vec<String>,
+    #[serde(default)]
+    pub types: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -214,6 +242,8 @@ enum Entry {
         export: String,
         namespace: String,
         event_name: String,
+        #[serde(default)]
+        filter: Option<RequestFilter>,
     },
     Popup {
         fn_name: String,
@@ -229,6 +259,13 @@ enum Entry {
         fn_name: String,
         #[serde(flatten)]
         panel: SidePanel,
+    },
+    DevtoolsPanel {
+        #[serde(flatten)]
+        panel: DevtoolsPanel,
+        file: String,
+        line: usize,
+        column: usize,
     },
     Omnibox(Omnibox),
     ContentScript {
@@ -345,6 +382,7 @@ pub fn parse_entries(text: &str) -> anyhow::Result<ExtensionMetadata> {
     let mut popups = Vec::new();
     let mut options_pages = Vec::new();
     let mut side_panels: Vec<(String, SidePanel)> = Vec::new();
+    let mut devtools_panels: Vec<((String, usize, usize), DevtoolsPanel)> = Vec::new();
     let mut omniboxes: Vec<Omnibox> = Vec::new();
     let mut menus = Vec::new();
     let mut commands = Vec::new();
@@ -406,11 +444,13 @@ pub fn parse_entries(text: &str) -> anyhow::Result<ExtensionMetadata> {
                 export,
                 namespace,
                 event_name,
+                filter,
             } => metadata.event_handlers.push(EventHandler {
                 fn_name,
                 export,
                 namespace,
                 event_name,
+                filter,
             }),
             Entry::Popup { fn_name, styles } => {
                 metadata.popup_styles = styles;
@@ -421,6 +461,7 @@ pub fn parse_entries(text: &str) -> anyhow::Result<ExtensionMetadata> {
                 options_pages.push(fn_name)
             }
             Entry::SidePanel { fn_name, panel } => side_panels.push((fn_name, panel)),
+            Entry::DevtoolsPanel { panel, file, line, column } => devtools_panels.push(((file, line, column), panel)),
             Entry::Omnibox(omnibox) => omniboxes.push(omnibox),
             Entry::ContentScript {
                 fn_name,
@@ -498,6 +539,20 @@ pub fn parse_entries(text: &str) -> anyhow::Result<ExtensionMetadata> {
         );
     }
     metadata.side_panel = side_panels.pop().map(|(_, panel)| panel);
+    devtools_panels.sort_by(|a, b| a.0.cmp(&b.0));
+    metadata.devtools_panels = devtools_panels.into_iter().map(|(_, panel)| panel).collect();
+    for (index, panel) in metadata.devtools_panels.iter().enumerate() {
+        let id = |title: &str| title.split_whitespace().collect::<String>();
+        if let Some(other) = metadata.devtools_panels[..index].iter().find(|other| id(&other.title) == id(&panel.title)) {
+            bail!(
+                "the devtools panels `{}` (`{}`) and `{}` (`{}`) have the same title once spaces are left out; Chrome tells panels apart that way, so give each its own",
+                other.fn_name,
+                other.title,
+                panel.fn_name,
+                panel.title
+            );
+        }
+    }
     omniboxes.sort_by(|a, b| a.fn_name.cmp(&b.fn_name));
     if omniboxes.len() > 1 {
         bail!(
@@ -543,6 +598,29 @@ fn check_event_permissions(metadata: &ExtensionMetadata) -> anyhow::Result<()> {
     check_event_permission(metadata, "web_navigation", "webNavigation", "WebNavigation")?;
     check_event_permission(metadata, "bookmarks", "bookmarks", "Bookmarks")?;
     check_event_permission(metadata, "history", "history", "History")?;
+    check_event_permission(metadata, "sessions", "sessions", "Sessions")?;
+    check_web_request(metadata)?;
+    if let Some(handler) = metadata.event_handlers.iter().find(|handler| handler.namespace == "runtime" && handler.event_name == "on_user_script_message") {
+        if !metadata.optional_permissions.iter().any(|listed| listed == "userScripts") {
+            bail!("`{}` listens to `runtime::on_user_script_message`; add `UserScripts` to `optional_permissions` in #[oxichrome::extension]", handler.fn_name);
+        }
+    }
+    Ok(())
+}
+
+fn check_web_request(metadata: &ExtensionMetadata) -> anyhow::Result<()> {
+    let listed = check_event_permission(metadata, "web_request", "webRequest", "WebRequest")?;
+    if listed && metadata.event_handlers.iter().any(|handler| handler.namespace == "web_request") && metadata.host_permissions.is_empty() && metadata.optional_host_permissions.is_empty() {
+        bail!("`web_request` events only report requests to sites the extension has host permission for; add them to `host_permissions` in #[oxichrome::extension], like `\"https://example.com/*\"`");
+    }
+    let auth: Vec<&EventHandler> = metadata.event_handlers.iter().filter(|handler| handler.namespace == "web_request" && handler.event_name == "on_auth_required").collect();
+    if auth.len() > 1 {
+        bail!(
+            "`{}` and `{}` both answer `web_request::on_auth_required`; keep one handler and decide there, since the browser takes only one answer",
+            auth[0].fn_name,
+            auth[1].fn_name
+        );
+    }
     Ok(())
 }
 
