@@ -23,6 +23,7 @@ pub mod permissions;
 pub mod runtime;
 pub mod scripting;
 pub mod search;
+pub mod sessions;
 pub mod side_panel;
 pub mod storage;
 pub mod tab_groups;

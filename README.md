@@ -1025,6 +1025,14 @@ management::uninstall_self().await?;                                     // righ
 // Most visited sites (requires the "topSites" permission)
 let sites = oxichrome::top_sites::get().await?;                         // Vec<Site>, each with url and title
 
+// Recently closed tabs and windows (requires the "sessions" permission, and "tabs" for their URLs)
+use oxichrome::sessions::{self, Closed, Restored};
+let closed = sessions::recently_closed(10).await?;                     // newest first, up to sessions::MAX_RESULTS (25)
+if let Some(Closed::Tab(tab)) = closed.first() {                       // also Closed::Window, with its tabs
+    let back: Restored = sessions::restore(&tab.session_id).await?;    // Restored::Tab { tab_id, window_id } or Restored::Window
+}
+sessions::restore_latest().await?;                                     // whatever was closed last
+
 // Search with the user's default search engine (requires the "search" permission)
 use oxichrome::search::{self, Where};
 search::query("rust web extensions", Where::NewTab).await?;           // also CurrentTab, NewWindow, Tab(tab_id)
@@ -1252,6 +1260,8 @@ fn Options() -> impl IntoView {
 ```
 
 `top_sites::get` lists the user's most visited sites, one page per site in both browsers, most visited first. Each browser picks which page stands for a site and how many to list, and a new profile can start with the browser's own suggestions (Chrome lists its Web Store). Search shortcuts and duplicates are left out, and a page without a title has an empty `title`.
+
+`sessions::recently_closed` reads the same in both browsers: `closed_at` is in milliseconds (Chrome reports seconds), a closed window lists its tabs in order without session ids of their own (Firefox has none, so the window comes back whole), and without `Tabs` a tab's `url` and `title` are `None`. `restore` gives back the new tab or window ids; the tabs may still be loading, so read their URL with `tabs::get` once they have. Restoring an id twice, a made up id, or `restore_latest` with nothing closed is an `InvalidArgument` with the same message in both. `#[oxichrome::on(sessions::on_changed)] async fn changed() {}` runs once per change: Chrome fires twice when something is restored, and oxichrome passes one on.
 
 `search::query` searches with whatever engine the user picked, in the place you name. `Where::CurrentTab` is the tab the user is looking at in the current window, the same in both browsers (Chrome would otherwise replace the extension page that made the call). Blank text is an error (Chrome refuses empty text, Firefox would search for nothing), and so is a tab that doesn't exist. Neither browser lets an extension choose the engine in both, so oxichrome doesn't.
 

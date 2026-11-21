@@ -32,6 +32,7 @@ pub const EVENTS: &[(&str, &[&str])] = &[
     ),
     ("bookmarks", &["on_created", "on_removed", "on_changed", "on_moved"]),
     ("history", &["on_visited", "on_visit_removed"]),
+    ("sessions", &["on_changed"]),
 ];
 
 fn distance(a: &str, b: &str) -> usize {

@@ -149,6 +149,7 @@ pub mod events {
     pub struct BookmarksOnMoved;
     pub struct HistoryOnVisited;
     pub struct HistoryOnVisitRemoved;
+    pub struct SessionsOnChanged;
 }
 
 macro_rules! arity {
@@ -225,6 +226,7 @@ arity! {
     BookmarksOnMoved = 1,
     HistoryOnVisited = 1,
     HistoryOnVisitRemoved = 1,
+    SessionsOnChanged = 0,
 }
 
 impl EventArg<events::NotificationsOnClicked, 1> for String {}

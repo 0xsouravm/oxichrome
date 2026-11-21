@@ -616,6 +616,22 @@ chrome.windows?.onRemoved?.addListener((id) => highlightedSeen.delete(id));
 }});
 "#
             ));
+        } else if event == "chrome.sessions.onChanged" {
+            // Chrome fires twice for one restore; one change, one call.
+            listeners.push_str(&format!(
+                r#"let sessionsChangePending = false;
+{event}.addListener(() => {{
+    if (sessionsChangePending) {{
+        return;
+    }}
+    sessionsChangePending = true;
+    setTimeout(() => {{
+        sessionsChangePending = false;
+        dispatch(() => [{handlers}].forEach((handler) => handler()));
+    }}, 50);
+}});
+"#
+            ));
         } else if event == "chrome.windows.onFocusChanged" {
             listeners.push_str(&format!(
                 r#"{event}.addListener((id) => {{
@@ -1958,6 +1974,34 @@ mod tests {
         assert!(js.contains("tabId: tab && tab.id >= 0 ? tab.id : undefined"), "{js}");
         metadata.commands.clear();
         assert!(!generate_background_js(&metadata, "my-ext").contains("chrome.commands"));
+    }
+
+    #[test]
+    fn sessions_changes_come_once() {
+        let metadata = metadata_with_handlers(&[("changed", "sessions", "on_changed")]);
+        let js = generate_background_js(&metadata, "ext");
+        assert!(js.contains("chrome.sessions.onChanged.addListener(() => {"), "{js}");
+        assert!(js.contains("if (sessionsChangePending) {"), "{js}");
+    }
+
+    #[test]
+    fn devtools_pages() {
+        let text = r#"{"kind":"extension","name":"T","version":"1.0.0","description":null,"gecko_id":null,"permissions":[],"host_permissions":[],"icons":[],"action":null}
+{"kind":"devtools_panel","fn_name":"Second","export":"__oxichrome_mount_devtools_Second","title":"__MSG_second__","icon":null,"styles":[],"file":"src/lib.rs","line":20,"column":1}
+{"kind":"devtools_panel","fn_name":"First","export":"__oxichrome_mount_devtools_First","title":"First","icon":"icons/p.png","styles":["p.css"],"file":"src/lib.rs","line":3,"column":1}"#;
+        let metadata = crate::metadata::parse_entries(text).unwrap();
+        let names: Vec<_> = metadata.devtools_panels.iter().map(|panel| panel.fn_name.as_str()).collect();
+        assert_eq!(names, ["First", "Second"], "panels keep the order they're written in");
+        let js = generate_devtools_js(&metadata.devtools_panels);
+        assert!(js.contains(r#"[["First","icons/p.png","devtools-First.html"],["__MSG_second__","","devtools-Second.html"]]"#), "{js}");
+        let first = &metadata.devtools_panels[0];
+        assert!(generate_devtools_panel_html(first).contains("src=\"devtools-First.js\"") && generate_devtools_panel_html(first).contains("href=\"p.css\""));
+        assert!(generate_devtools_panel_js("my-ext", first).contains("import init, { __oxichrome_mount_devtools_First } from './wasm/my_ext.js'"));
+        let twice = text.replace("\"title\":\"__MSG_second__\"", "\"title\":\"First\"");
+        let err = crate::metadata::parse_entries(&twice).unwrap_err().to_string();
+        assert!(err.contains("the same title once spaces are left out"), "{err}");
+        let spaced = text.replace("\"title\":\"__MSG_second__\"", "\"title\":\"Fi rst\"");
+        assert!(crate::metadata::parse_entries(&spaced).is_err(), "Chrome's panel id drops spaces");
     }
 
     #[test]

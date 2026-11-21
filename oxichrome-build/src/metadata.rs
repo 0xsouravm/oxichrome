@@ -598,6 +598,7 @@ fn check_event_permissions(metadata: &ExtensionMetadata) -> anyhow::Result<()> {
     check_event_permission(metadata, "web_navigation", "webNavigation", "WebNavigation")?;
     check_event_permission(metadata, "bookmarks", "bookmarks", "Bookmarks")?;
     check_event_permission(metadata, "history", "history", "History")?;
+    check_event_permission(metadata, "sessions", "sessions", "Sessions")?;
     check_web_request(metadata)?;
     if let Some(handler) = metadata.event_handlers.iter().find(|handler| handler.namespace == "runtime" && handler.event_name == "on_user_script_message") {
         if !metadata.optional_permissions.iter().any(|listed| listed == "userScripts") {

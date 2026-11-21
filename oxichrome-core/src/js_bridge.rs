@@ -1852,3 +1852,22 @@ extern "C" {
     pub fn devtools_reload(ignore_cache: bool) -> bool;
     pub fn devtools_listen(kind: &str, callback: &JsValue) -> JsValue;
 }
+
+#[wasm_bindgen(inline_js = r#"
+export function sessions_call(op, arg) {
+    const api = globalThis.chrome?.sessions;
+    if (!api) { throw new Error('oxichrome:no-permission'); }
+    const run = op === 'recent' ? api.getRecentlyClosed({ maxResults: arg }) : api.restore(arg);
+    return run.then((value) => JSON.stringify(value ?? null));
+}
+export function on_sessions_changed(callback) {
+    globalThis.chrome?.sessions?.onChanged.addListener(callback);
+}
+"#)]
+extern "C" {
+    #[wasm_bindgen(catch)]
+    pub fn sessions_call(op: &str, arg: &JsValue) -> Result<js_sys::Promise, JsValue>;
+
+    #[wasm_bindgen(js_name = on_sessions_changed)]
+    pub fn chrome_sessions_on_changed_add_listener(callback: &Closure<dyn FnMut(JsValue)>);
+}
