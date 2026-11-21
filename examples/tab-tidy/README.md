@@ -1,6 +1,6 @@
 # Tab Tidy
 
-A tab manager: search every open tab, switch to it, pin, mute, move it to its own window or close it, and clear out duplicate tabs in one click. The same list lives in the popup and in the side panel (Firefox's sidebar). English and German.
+A tab manager: search every open tab and jump to it, close duplicate tabs, group tabs by site, put a tab to sleep to free its memory, and bring back recently closed tabs and windows. The same page lives in the popup and in the side panel (Firefox's sidebar). English and German. All of it works in Chrome and Firefox; a browser without tab groups shows the error next to the button instead.
 
 ```sh
 cd examples/tab-tidy
@@ -12,23 +12,26 @@ cargo oxichrome build --target firefox   # Firefox: load dist/firefox/manifest.j
 
 | Feature | Where |
 |---|---|
-| Popup and side panel sharing Leptos components, with one stylesheet for both (`style = [...]`) | `src/lib.rs`, `src/ui.rs` |
-| `tabs::query` into your own struct (with `mutedInfo`), `tabs::update`, `tabs::remove` | `src/tidy.rs` |
-| `windows::current`, `windows::create(NewWindow::new().tab(id))`, `windows::update(... focused(true))` | `src/tidy.rs` |
-| `side_panel::open_on_click` from the popup | `Popup` in `src/lib.rs` |
-| A keyboard shortcut (`#[command]`), reading it back with `COMMAND.shortcut()` and opening the browser's shortcut settings | `close_duplicates`, `Footer` |
-| A shortcut for the toolbar button (`action = { shortcut = ... }`) | `#[extension]` |
-| Right-click menus on the toolbar button and on pages, in a submenu | `menu_*` in `src/lib.rs` |
-| Badge text, colour and title from the background, kept current with `tabs::on_updated` and `tabs::on_removed` | `refresh_badge` |
-| `storage` for the running total of closed tabs | `closed_total` |
+| Typed tabs: `tabs::query` into `Vec<tabs::Tab>`, `tabs::update`, `tabs::remove` | `src/tidy.rs` |
+| Typed events: `tabs::on_updated` with the `Tab`, `tabs::on_removed` with `tabs::Removed` | `tab_updated`, `tab_removed` in `src/lib.rs` |
+| Tab groups: `tabs::group`, then `tab_groups::update` for the title and colour | `group_by_site` |
+| `tabs::discard` to free a background tab's memory | `tab_row` |
+| Sessions: `sessions::recently_closed`, `sessions::restore` and `#[on(sessions::on_changed)]` | `closed_row`, `sessions_changed` |
+| Typed messages from the background to open pages (`runtime::send_message`, `runtime::listen`) so the lists stay current | `Notice`, `tidy_page` |
+| `windows::create` (empty, or moving a tab), `windows::update(... focused(true))` | `src/tidy.rs` |
+| Popup and side panel sharing one Leptos view, `side_panel::open_on_click` | `Popup`, `Panel` |
+| A keyboard shortcut (`#[command]`) and one for the toolbar button (`action = { shortcut = ... }`) | `close_duplicates`, `#[extension]` |
+| Right-click menus on the toolbar button and on pages, in a submenu | `menu_*` |
+| Badge text with the number of duplicate tabs | `refresh_badge` |
 | Every user-facing string through `t!`, with `en` and `de` | `static/_locales` |
 
-Pinned and active tabs are never closed as duplicates, and two addresses that differ only after `#` count as the same page.
+Pinned and active tabs are never closed as duplicates, and two addresses that differ only after `#` count as the same page. Grouping skips pinned tabs and tabs already in a group, and only groups a site with two or more tabs in the same window.
 
 ## Try it
 
 1. Open a few tabs, including the same page twice. The badge shows how many duplicates there are.
-2. Press <kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd>T</kbd> (or click the toolbar button), type part of a title and press <kbd>Enter</kbd> to jump to it.
-3. Hover a row to pin it, move it to a new window or close it.
-4. Press <kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd>U</kbd> anywhere to close duplicates, or right-click the toolbar button.
-5. Click the panel button in the popup's corner to keep the list open beside the page.
+2. Press <kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd>T</kbd>, type part of a title and press <kbd>Enter</kbd> to jump to it.
+3. Click "Group tabs by site", or right-click a page and pick it from the Tab Tidy submenu.
+4. Hover a background tab and click "Sleep". It shows "asleep" and loads again when you select it.
+5. Close a tab, then click "Restore" under "Recently closed".
+6. Press <kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd>U</kbd> anywhere to close duplicates.

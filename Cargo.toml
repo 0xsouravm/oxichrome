@@ -13,6 +13,7 @@ members = [
     "examples/page-lens",
     "examples/quiet-web",
     "examples/launchpad",
+    "examples/snippets",
 ]
 
 [workspace.package]

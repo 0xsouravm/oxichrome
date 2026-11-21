@@ -1,17 +1,17 @@
 mod options;
 mod popup;
 mod rules;
-mod ui;
 
 use oxichrome::permissions::PermissionSet;
 use oxichrome::prelude::*;
-use oxichrome::web_navigation::{Failure, NavError, Navigation};
+use oxichrome::web_navigation::{Failure, NavError};
+use oxichrome::web_request::{NetError, NetErrorKind, Request};
 
 #[extension(
     name = "Quiet Web",
-    description = "Block trackers and annoyances, keep a list of sites you don't want to open, strip tracking parameters, and clear a site's cookies.",
+    description = "Block trackers and annoyances, keep a list of sites you don't want to open, see which trackers were stopped, and clear a site's cookies.",
     version = "0.3.0",
-    permissions = [DeclarativeNetRequest, Storage, Cookies, WebNavigation, Tabs],
+    permissions = [DeclarativeNetRequest, WebRequest, Storage, Cookies, WebNavigation, Tabs],
     optional_host_permissions = ["https://*/*", "http://*/*"],
     rule_sets = { trackers = "rules/trackers.json", annoyances = "rules/annoyances.json" },
     disabled_rule_sets = [annoyances],
@@ -37,16 +37,20 @@ async fn revoked(_set: PermissionSet) {
     let _ = rules::apply(&rules::state().await).await;
 }
 
-#[on(web_navigation::on_completed)]
-async fn loaded(nav: Navigation) {
-    if nav.is_top_level() && rules::is_web(&nav.url) {
-        rules::count(false).await;
+#[on(web_navigation::on_error_occurred)]
+async fn page_failed(failure: Failure) {
+    if failure.is_top_level() && failure.error == NavError::Blocked {
+        rules::count_page().await;
     }
 }
 
-#[on(web_navigation::on_error_occurred)]
-async fn failed(failure: Failure) {
-    if failure.is_top_level() && failure.error == NavError::Blocked {
-        rules::count(true).await;
+#[on(
+    web_request::on_error_occurred,
+    urls = ["*://*.doubleclick.net/*", "*://*.googlesyndication.com/*", "*://*.criteo.com/*", "*://*.taboola.com/*", "*://*.outbrain.com/*"],
+    types = [Script, Image, XmlHttpRequest, SubFrame, Ping]
+)]
+async fn tracker_stopped(request: Request, error: NetError) {
+    if matches!(error.kind, NetErrorKind::Blocked | NetErrorKind::Aborted) {
+        rules::log_request(rules::Stopped { host: rules::host(&request.url), kind: format!("{:?}", request.kind) }).await;
     }
 }

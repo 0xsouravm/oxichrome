@@ -17,5 +17,6 @@ cargo oxichrome build --target firefox   # Firefox: load dist/firefox/manifest.j
 | `#[popup]` and `#[options_page]` written as Leptos components, with stylesheets from `static/` | `Popup`, `Options` |
 | `storage::get` and `storage::set` with a serde struct and `#[serde(default)]`, so old saved data still loads after you add a field | `Count`, `load`, `save` |
 | `action::set_badge_text` and `set_badge_background_color` | `save` |
+| A typed `runtime::on_installed` event that opens the options page on first install | `installed` |
 
 Everything else in `examples/` builds on these pieces.
