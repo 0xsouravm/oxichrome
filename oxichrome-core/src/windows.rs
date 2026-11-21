@@ -185,6 +185,8 @@ impl NewWindow {
         self
     }
 
+    /// Whether the new window takes focus. Firefox can't open a window in the background,
+    /// so there `focused(false)` is left out and the window opens focused.
     pub fn focused(mut self, focused: bool) -> Self {
         self.focused = Some(focused);
         self

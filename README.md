@@ -45,6 +45,7 @@ cargo oxichrome build --target firefox # Firefox
 - Proc macros (`#[extension]`, `#[background]`, `#[on]`, `#[popup]`, `#[options_page]`, `#[side_panel]`, `#[content_script]`, `#[menu]`, `#[submenu]`, `#[command]`) transform your Rust into wasm-bindgen exports
 - Typed bindings to `chrome.storage`, `chrome.tabs`, `chrome.runtime`
 - Typed messages and ports between the background, pages and content scripts, routed by message type
+- Tabs you can move, duplicate, discard, highlight and capture, and tab groups, the same in Chrome and Firefox
 - Leptos for reactive popup, options page and side panel UI
 - `cargo oxichrome build` handles everything: compilation, wasm-bindgen, manifest generation, JS/HTML shim generation, static asset copying, optional wasm-opt
 - **`--target firefox`** generates a Firefox-compatible Manifest V3 extension
@@ -230,6 +231,14 @@ Listeners are registered synchronously when the background script starts, and ev
 | `runtime::on_installed` | `runtime::InstalledDetails` |
 | `runtime::on_message` | your message type, `runtime::MessageSender`, `runtime::Reply` (see [Messaging](#messaging)) |
 | `runtime::on_connect` | `runtime::Port` |
+| `tabs::on_created` | `tabs::Tab` |
+| `tabs::on_updated` | `tab_id: i32`, the change as a `JsValue`, `tabs::Tab` |
+| `tabs::on_activated` | `tabs::Activated` |
+| `tabs::on_removed` | `tab_id: i32, tabs::Removed` |
+| `tabs::on_moved` | `tab_id: i32, tabs::Moved` |
+| `tabs::on_attached` / `on_detached` | `tab_id: i32, tabs::Attached` / `tabs::Detached` |
+| `tabs::on_highlighted` | `tabs::Highlighted` |
+| `tab_groups::on_created` / `on_updated` / `on_moved` / `on_removed` | `tab_groups::Group` |
 | `alarms::on_alarm` | `alarms::Alarm` |
 | `notifications::on_clicked` | `id: String` |
 | `notifications::on_closed` | `id: String, by_user: Option<bool>` |
@@ -795,7 +804,23 @@ let tab: Tab = oxichrome::tabs::get(tab_id).await?;
 let tab: Tab = oxichrome::tabs::update(tab_id, &props).await?;
 oxichrome::tabs::remove(tab_id).await?;
 oxichrome::tabs::send_message(tab_id, &msg).await?;
-let tab: oxichrome::tabs::Tab = oxichrome::tabs::get(tab_id).await?; // a typed tab: id, window_id, url, title, active, ...
+let tab: oxichrome::tabs::Tab = oxichrome::tabs::get(tab_id).await?; // a typed tab: id, window_id, url, title, active, group_id, ...
+use oxichrome::tabs::{ImageFormat, Position};
+tabs::reload(tab_id, false).await?;                                   // true bypasses the cache
+let copy: Tab = tabs::duplicate(tab_id).await?;
+let moved: Tab = tabs::move_tab(tab_id, Position::index(0)).await?;
+let moved: Vec<Tab> = tabs::move_tabs(&[a, b], Position::end().in_window(window_id)).await?;
+let window = tabs::highlight(None, &[0, 2]).await?;                    // tab indexes, the first becomes active
+let tab: Tab = tabs::discard(tab_id).await?;                          // unload a background tab to free memory
+let png: String = tabs::capture_visible_tab(None, ImageFormat::Png).await?; // a data: URL; also ImageFormat::Jpeg(quality)
+
+// Tab groups (requires the "tabGroups" permission for tab_groups::*)
+use oxichrome::tab_groups::{self, Color, Query, Update};
+let group_id: i64 = tabs::group(&[a, b]).await?;                      // also add_to_group, group_in_window
+tab_groups::update(group_id, &Update { title: Some("Work".into()), color: Some(Color::Blue), ..Default::default() }).await?;
+let groups = tab_groups::query(&Query { window_id: Some(window_id), ..Default::default() }).await?;
+tab_groups::move_group(group_id, Position::end()).await?;              // also get
+tabs::ungroup(&[a]).await?;                                           // a group whose last tab leaves is removed
 
 // Windows
 use oxichrome::windows::{self, NewWindow, WindowState, WindowUpdate};
@@ -931,7 +956,17 @@ Notification::basic("icon.png", "Reminder", "Standup")
 
 Values you pass to `storage`, `tabs` and `runtime`, and the values you read back, follow `serde_json`'s rules, so a struct, a `HashMap` (integer keys too) or `serde_json::json!({...})` arrives in the browser as the plain object you'd expect, in both browsers.
 
-A `Window` has `id`, `kind` (`Normal`, `Popup`, ...), `state`, `focused`, `incognito`, the bounds, `title` (Firefox only) and, from the `_with_tabs` functions, `tabs`. Browsers refuse some combinations with a vague "Invalid value for state", so these return `InvalidArgument` before reaching the browser: a size or position together with `Minimized`, `Maximized` or `Fullscreen`; `focused(true)` with `Minimized`; `focused(false)` with `Maximized` or `Fullscreen`; a `javascript:` URL; both `tab` and `url`; and an empty update. Creating an `incognito()` window that the user hasn't allowed the extension into returns `Err` in both browsers (Chrome would hand back nothing). `title_preface` is Firefox only, and Chrome builds drop it. Firefox refuses `about:`, `chrome:` and `file:` URLs; Chrome opens them.
+Tabs need no permission to reload, duplicate, move, highlight, discard or group them; reading a tab's `url` and `title` needs `Tabs` or host permission. Chrome and Firefox differ in several places, and oxichrome returns the same thing in both. A missing tab is `InvalidArgument("no tab with id N")`. `move_tabs` always returns a `Vec` and `move_tab` one `Tab`. `discard` refuses the active tab (Chrome would unload it, Firefox ignores the call), returns the tab, and is fine on a tab that is already discarded; a discarded tab's `status` is `"unloaded"` in both. `capture_visible_tab` needs `ActiveTab` (after the user invokes the extension) or host permission for the page. It asks for the format you name (the defaults differ), and since Chrome allows two captures a second, extra calls wait their turn instead of failing. `on_highlighted` fires once per change of selection (Chrome repeats it after moves). Group ids are `i64`, since Firefox's are larger than an `i32`. `tabs::group` and `tabs::ungroup` work without `TabGroups`; `tab_groups::*` and its events need it. Grouping a pinned tab unpins it.
+
+```rust
+#[oxichrome::on(tabs::on_moved)]
+async fn moved(tab_id: i32, info: tabs::Moved) {}               // window_id, from_index, to_index
+
+#[oxichrome::on(tab_groups::on_updated)]
+async fn group_changed(group: tab_groups::Group) {}             // id, title, color, collapsed, window_id
+```
+
+A `Window` has `id`, `kind` (`Normal`, `Popup`, ...), `state`, `focused`, `incognito`, the bounds, `title` (Firefox only) and, from the `_with_tabs` functions, `tabs`. Browsers refuse some combinations with a vague "Invalid value for state", so these return `InvalidArgument` before reaching the browser: a size or position together with `Minimized`, `Maximized` or `Fullscreen`; `focused(true)` with `Minimized`; `focused(false)` with `Maximized` or `Fullscreen`; a `javascript:` URL; both `tab` and `url`; and an empty update. Firefox can't open a window in the background, so `focused(false)` is left out there and the window opens focused. Creating an `incognito()` window that the user hasn't allowed the extension into returns `Err` in both browsers (Chrome would hand back nothing). `title_preface` is Firefox only, and Chrome builds drop it. Firefox refuses `about:`, `chrome:` and `file:` URLs; Chrome opens them.
 
 ```rust
 #[oxichrome::on(windows::on_created)]

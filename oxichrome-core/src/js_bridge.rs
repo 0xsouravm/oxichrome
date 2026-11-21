@@ -438,6 +438,8 @@ export function windows_all(populate) {
 export function windows_create(data) {
     if (!isFirefox()) {
         delete data.titlePreface;
+    } else if (data.focused === false) {
+        delete data.focused;
     }
     return api().create(data).then((window) => window ?? null);
 }
@@ -1644,4 +1646,83 @@ extern "C" {
 extern "C" {
     #[wasm_bindgen(js_namespace = ["chrome", "runtime", "onConnect"], js_name = addListener)]
     pub fn chrome_runtime_on_connect_add_listener(callback: &Closure<dyn FnMut(JsValue)>);
+}
+
+#[wasm_bindgen]
+extern "C" {
+    #[wasm_bindgen(js_namespace = ["chrome", "tabs", "onCreated"], js_name = addListener)]
+    pub fn chrome_tabs_on_created_add_listener(callback: &Closure<dyn FnMut(JsValue)>);
+    #[wasm_bindgen(js_namespace = ["chrome", "tabs", "onMoved"], js_name = addListener)]
+    pub fn chrome_tabs_on_moved_add_listener(callback: &Closure<dyn FnMut(JsValue, JsValue)>);
+    #[wasm_bindgen(js_namespace = ["chrome", "tabs", "onAttached"], js_name = addListener)]
+    pub fn chrome_tabs_on_attached_add_listener(callback: &Closure<dyn FnMut(JsValue, JsValue)>);
+    #[wasm_bindgen(js_namespace = ["chrome", "tabs", "onDetached"], js_name = addListener)]
+    pub fn chrome_tabs_on_detached_add_listener(callback: &Closure<dyn FnMut(JsValue, JsValue)>);
+    #[wasm_bindgen(js_namespace = ["chrome", "tabs", "onHighlighted"], js_name = addListener)]
+    pub fn chrome_tabs_on_highlighted_add_listener(callback: &Closure<dyn FnMut(JsValue)>);
+    #[wasm_bindgen(js_namespace = ["chrome", "tabGroups", "onCreated"], js_name = addListener)]
+    pub fn chrome_tab_groups_on_created_add_listener(callback: &Closure<dyn FnMut(JsValue)>);
+    #[wasm_bindgen(js_namespace = ["chrome", "tabGroups", "onUpdated"], js_name = addListener)]
+    pub fn chrome_tab_groups_on_updated_add_listener(callback: &Closure<dyn FnMut(JsValue)>);
+    #[wasm_bindgen(js_namespace = ["chrome", "tabGroups", "onRemoved"], js_name = addListener)]
+    pub fn chrome_tab_groups_on_removed_add_listener(callback: &Closure<dyn FnMut(JsValue)>);
+    #[wasm_bindgen(js_namespace = ["chrome", "tabGroups", "onMoved"], js_name = addListener)]
+    pub fn chrome_tab_groups_on_moved_add_listener(callback: &Closure<dyn FnMut(JsValue)>);
+}
+
+#[wasm_bindgen(inline_js = r#"
+export function tabs_call(method, args) {
+    return Promise.resolve(chrome.tabs[method](...args));
+}
+
+export function tabs_group_call(method, arg) {
+    if (typeof globalThis.chrome?.tabs?.[method] !== 'function') {
+        throw new Error('oxichrome:no-tab-groups');
+    }
+    return Promise.resolve(chrome.tabs[method](arg));
+}
+
+export function tab_groups_call(method, args) {
+    const api = globalThis.chrome?.tabGroups;
+    if (!api || typeof api[method] !== 'function') {
+        throw new Error('oxichrome:no-tab-groups');
+    }
+    return Promise.resolve(api[method](...args));
+}
+
+let lastCapture = 0;
+let captureQueue = Promise.resolve();
+
+export function tabs_capture(window, options) {
+    const run = async () => {
+        for (let attempt = 0; ; attempt++) {
+            const wait = lastCapture + 520 - Date.now();
+            if (wait > 0) {
+                await new Promise((resolve) => setTimeout(resolve, wait));
+            }
+            lastCapture = Date.now();
+            try {
+                return await (window === undefined ? chrome.tabs.captureVisibleTab(options) : chrome.tabs.captureVisibleTab(window, options));
+            } catch (error) {
+                if (attempt < 8 && String(error && error.message).includes('MAX_CAPTURE_VISIBLE_TAB_CALLS_PER_SECOND')) {
+                    continue;
+                }
+                throw error;
+            }
+        }
+    };
+    const result = captureQueue.then(run, run);
+    captureQueue = result.catch(() => {});
+    return result;
+}
+"#)]
+extern "C" {
+    #[wasm_bindgen(catch)]
+    pub fn tabs_call(method: &str, args: &[JsValue]) -> Result<js_sys::Promise, JsValue>;
+    #[wasm_bindgen(catch)]
+    pub fn tabs_group_call(method: &str, arg: &JsValue) -> Result<js_sys::Promise, JsValue>;
+    #[wasm_bindgen(catch)]
+    pub fn tab_groups_call(method: &str, args: &js_sys::Array) -> Result<js_sys::Promise, JsValue>;
+    #[wasm_bindgen(catch)]
+    pub fn tabs_capture(window: &JsValue, options: &JsValue) -> Result<js_sys::Promise, JsValue>;
 }

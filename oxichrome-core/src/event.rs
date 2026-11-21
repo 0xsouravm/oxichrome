@@ -91,6 +91,15 @@ pub mod events {
     pub struct TabsOnUpdated;
     pub struct TabsOnRemoved;
     pub struct TabsOnActivated;
+    pub struct TabsOnCreated;
+    pub struct TabsOnMoved;
+    pub struct TabsOnAttached;
+    pub struct TabsOnDetached;
+    pub struct TabsOnHighlighted;
+    pub struct TabGroupsOnCreated;
+    pub struct TabGroupsOnUpdated;
+    pub struct TabGroupsOnRemoved;
+    pub struct TabGroupsOnMoved;
     pub struct ActionOnClicked;
     pub struct AlarmsOnAlarm;
     pub struct NotificationsOnClicked;
@@ -148,6 +157,15 @@ arity! {
     TabsOnUpdated = 3,
     TabsOnRemoved = 2,
     TabsOnActivated = 1,
+    TabsOnCreated = 1,
+    TabsOnMoved = 2,
+    TabsOnAttached = 2,
+    TabsOnDetached = 2,
+    TabsOnHighlighted = 1,
+    TabGroupsOnCreated = 1,
+    TabGroupsOnUpdated = 1,
+    TabGroupsOnRemoved = 1,
+    TabGroupsOnMoved = 1,
     ActionOnClicked = 1,
     AlarmsOnAlarm = 1,
     NotificationsOnClicked = 1,

@@ -552,6 +552,20 @@ globalThis.chrome?.storage?.session?.get([idleKey, '__oxichrome_idle_interval'])
 }});
 "#
             ));
+        } else if event == "chrome.tabs.onHighlighted" {
+            listeners.push_str(&format!(
+                r#"const highlightedSeen = new Map();
+chrome.windows?.onRemoved?.addListener((id) => highlightedSeen.delete(id));
+{event}.addListener((info) => {{
+    const key = info.tabIds.join(',');
+    if (highlightedSeen.get(info.windowId) === key) {{
+        return;
+    }}
+    highlightedSeen.set(info.windowId, key);
+    dispatch(() => [{handlers}].forEach((handler) => handler(info)));
+}});
+"#
+            ));
         } else if event == "chrome.windows.onFocusChanged" {
             listeners.push_str(&format!(
                 r#"{event}.addListener((id) => {{
@@ -1409,7 +1423,7 @@ mod tests {
             export: "__oxichrome_on_handle_install".to_string(),
                 namespace: "runtime".to_string(),
                 event_name: "on_installed".to_string(),
-            }],
+                }],
             has_popup: false,
             has_options_page: false,
             side_panel: None,
@@ -1872,5 +1886,13 @@ mod tests {
         assert!(js.contains("if (replied) {"));
         assert!(js.contains("args[2] = reply;"));
         assert!(js.contains(".then(() => reply());"));
+    }
+
+    #[test]
+    fn highlighted_sends_each_selection_once() {
+        let metadata = metadata_with_handlers(&[("high", "tabs", "on_highlighted")]);
+        let js = generate_background_js(&metadata, "ext");
+        assert!(js.contains("if (highlightedSeen.get(info.windowId) === key) {"));
+        assert!(js.contains("attach('tabs', () => {"));
     }
 }
