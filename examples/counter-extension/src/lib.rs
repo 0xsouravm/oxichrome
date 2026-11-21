@@ -1,7 +1,8 @@
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 use oxichrome::prelude::*;
-use oxichrome::{action, storage};
+use oxichrome::runtime::{InstallReason, InstalledDetails};
+use oxichrome::{action, runtime, storage};
 use serde::{Deserialize, Serialize};
 
 #[extension(
@@ -54,6 +55,13 @@ fn short(value: i64) -> String {
 #[background]
 async fn start() {
     save(load().await).await;
+}
+
+#[on(runtime::on_installed)]
+async fn installed(details: InstalledDetails) {
+    if details.reason == InstallReason::Install {
+        let _ = runtime::open_options_page().await;
+    }
 }
 
 fn use_count() -> RwSignal<Count> {

@@ -159,6 +159,7 @@ pub enum NavError {
 
 const FIREFOX_NETWORK: u64 = 0x804B_0000;
 const FIREFOX_SECURITY: u64 = 0x805A_0000;
+const FIREFOX_CANCELLED_BY_EXTENSION: u64 = 0x8000_4004;
 
 impl NavError {
     fn parse(text: &str) -> Self {
@@ -177,6 +178,9 @@ impl NavError {
             };
         }
         if let Some(code) = text.strip_prefix("Error code ").and_then(|code| code.trim().parse::<u64>().ok()) {
+            if code == FIREFOX_CANCELLED_BY_EXTENSION {
+                return NavError::Blocked;
+            }
             if code & 0xFFFF_0000 == FIREFOX_SECURITY {
                 return NavError::Certificate;
             }
@@ -439,6 +443,7 @@ mod tests {
             ("net::ERR_INTERNET_DISCONNECTED", "Error code 2152398864", NavError::Offline),
             ("net::ERR_UNSAFE_PORT", "Error code 2152398867", NavError::BlockedPort),
             ("net::ERR_CERT_AUTHORITY_INVALID", "Error code 2153390067", NavError::Certificate),
+            ("net::ERR_BLOCKED_BY_CLIENT", "Error code 2147500036", NavError::Blocked),
         ] {
             assert_eq!(NavError::parse(chrome), want, "{chrome}");
             assert_eq!(NavError::parse(firefox), want, "{firefox}");

@@ -5,7 +5,7 @@ use oxichrome_build::Browser;
 mod commands;
 
 #[derive(Parser)]
-#[command(name = "cargo-oxichrome", bin_name = "cargo")]
+#[command(name = "cargo-oxichrome", bin_name = "cargo", version)]
 struct Cli {
     #[command(subcommand)]
     command: CargoSubcommand,
@@ -17,6 +17,7 @@ enum CargoSubcommand {
 }
 
 #[derive(Parser)]
+#[command(version, display_name = "cargo-oxichrome")]
 struct OxichromeArgs {
     #[command(subcommand)]
     command: OxichromeCommand,
@@ -24,13 +25,18 @@ struct OxichromeArgs {
 
 #[derive(Subcommand)]
 enum OxichromeCommand {
+    #[command(about = "Build the extension into dist/chromium or dist/firefox")]
     Build {
-        #[arg(long)]
+        #[arg(long, help = "Optimize the build and shrink the wasm")]
         release: bool,
-        #[arg(long, default_value = "chromium")]
+        #[arg(long, default_value = "chromium", help = "The browser to build for: chromium or firefox")]
         target: String,
     },
+    #[command(about = "Remove the dist/ folder")]
     Clean,
+    #[command(about = "Print the version of cargo-oxichrome")]
+    Version,
+    #[command(about = "Make a new extension project")]
     New {
         #[arg(default_value = "my-extension", help = "Folder to create; its last part becomes the crate name")]
         path: String,
@@ -63,6 +69,7 @@ fn main() -> anyhow::Result<()> {
                 commands::build::run(release, browser)?;
             }
             OxichromeCommand::Clean => commands::clean::run()?,
+            OxichromeCommand::Version => println!("cargo-oxichrome {}", env!("CARGO_PKG_VERSION")),
             OxichromeCommand::New { path, minimal, side_panel, content_script, i18n, no_popup, no_options } => {
                 let base = if minimal { Parts::minimal() } else { Parts::default() };
                 let parts = Parts { popup: base.popup && !no_popup, options: base.options && !no_options, side_panel, content_script, i18n, ..base };

@@ -3,129 +3,60 @@
     "message": "Tab Tidy"
   },
   "app_desc": {
-    "message": "Tabs in allen Fenstern finden, wechseln, anheften, stummschalten und schließen, und doppelte Tabs auf einmal aufräumen."
-  },
-  "action_title": {
-    "message": "Tab Tidy"
-  },
-  "panel_title": {
-    "message": "Tab Tidy"
-  },
-  "tab_one": {
-    "message": "1 Tab"
-  },
-  "tab_many": {
-    "message": "$1 Tabs"
-  },
-  "window_one": {
-    "message": "1 Fenster"
-  },
-  "window_many": {
-    "message": "$1 Fenstern"
+    "message": "Offene Tabs durchsuchen, doppelte schließen, Tabs nach Website gruppieren, schlafen legen und geschlossene zurückholen."
   },
   "summary": {
-    "message": "$1 in $2"
+    "message": "Offene Tabs: $1"
   },
-  "search_placeholder": {
+  "search": {
     "message": "Tabs nach Titel oder Adresse suchen"
   },
-  "dupes_one": {
-    "message": "1 doppelter Tab"
+  "group_sites": {
+    "message": "Tabs nach Website gruppieren"
   },
-  "dupes_many": {
-    "message": "$1 doppelte Tabs"
-  },
-  "dupes_hint": {
-    "message": "Dieselbe Seite ist mehrfach offen. Angeheftete und aktive Tabs bleiben."
+  "grouped": {
+    "message": "Gruppen erstellt: $1"
   },
   "close_dupes": {
+    "message": "Doppelte Tabs schließen"
+  },
+  "close_n_dupes": {
+    "message": "Doppelte schließen ($1)"
+  },
+  "closed_dupes": {
+    "message": "Doppelte geschlossen: $1"
+  },
+  "sleep": {
+    "message": "Schlafen"
+  },
+  "slept": {
+    "message": "Tab schläft jetzt"
+  },
+  "asleep": {
+    "message": "schläft"
+  },
+  "close": {
     "message": "Schließen"
   },
-  "duplicate": {
-    "message": "Doppelt"
+  "recently_closed": {
+    "message": "Kürzlich geschlossen"
   },
-  "pinned": {
-    "message": "Angeheftet"
+  "restore": {
+    "message": "Wiederherstellen"
   },
-  "this_window": {
-    "message": "Dieses Fenster"
+  "untitled": {
+    "message": "Ohne Titel"
   },
-  "other_window": {
-    "message": "Fenster $1"
+  "closed_window": {
+    "message": "Fenster ($1 Tabs)"
   },
-  "focus_window": {
-    "message": "Zu diesem Fenster wechseln"
+  "move_window": {
+    "message": "Tab in ein neues Fenster verschieben"
   },
   "new_window": {
     "message": "Neues Fenster"
   },
-  "pin": {
-    "message": "Tab anheften"
-  },
-  "unpin": {
-    "message": "Tab lösen"
-  },
-  "mute": {
-    "message": "Tab stummschalten"
-  },
-  "unmute": {
-    "message": "Ton einschalten"
-  },
-  "move_window": {
-    "message": "In neues Fenster verschieben"
-  },
-  "close_tab": {
-    "message": "Tab schließen"
-  },
-  "no_match_title": {
-    "message": "Keine passenden Tabs"
-  },
-  "no_match_body": {
-    "message": "Versuche einen Teil des Titels oder einen Seitennamen."
-  },
-  "closed_so_far": {
-    "message": "$1 bisher geschlossen"
-  },
-  "shortcut_label": {
-    "message": "schließt Duplikate"
-  },
-  "shortcut_none": {
-    "message": "Kein Kürzel zum Schließen von Duplikaten"
-  },
-  "change_shortcut": {
-    "message": "Ändern"
-  },
   "open_panel": {
-    "message": "In der Seitenleiste öffnen"
-  },
-  "toast_closed_one": {
-    "message": "1 Duplikat geschlossen"
-  },
-  "toast_closed_many": {
-    "message": "$1 Duplikate geschlossen"
-  },
-  "toast_moved": {
-    "message": "In ein neues Fenster verschoben"
-  },
-  "toast_none": {
-    "message": "Keine Duplikate zum Schließen"
-  },
-  "cmd_dupes": {
-    "message": "Doppelte Tabs schließen"
-  },
-  "cmd_move": {
-    "message": "Aktuellen Tab in ein neues Fenster verschieben"
-  },
-  "menu_dupes": {
-    "message": "Doppelte Tabs schließen"
-  },
-  "menu_move": {
-    "message": "Tab in neues Fenster verschieben"
-  },
-  "menu_pin": {
-    "message": "Tab anheften oder lösen"
-  },
-  "menu_close_site": {
-    "message": "Andere Tabs dieser Seite schließen"
+    "message": "Seitenleiste"
   }
 }

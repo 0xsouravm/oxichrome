@@ -1,0 +1,31 @@
+:root {
+  --accent: #b7791f;
+  --accent-soft: #fbf1df;
+  --accent-ink: #ffffff;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --accent: #f2b84b;
+    --accent-soft: #3a2c12;
+    --accent-ink: #241703;
+  }
+}
+
+.status {
+  margin: 12px;
+}
+
+.card .notice.danger {
+  margin: 0 16px 16px;
+}
+
+#code {
+  min-height: 140px;
+  font-family: var(--mono);
+  font-size: 12.5px;
+}
+
+#save {
+  align-self: flex-end;
+}

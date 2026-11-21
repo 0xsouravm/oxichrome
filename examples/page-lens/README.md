@@ -1,6 +1,6 @@
 # Page Lens
 
-Look at a page before you read it: reading time, word and link counts, and its outline, with a click to jump to any heading. Make the text easier to read, outline the links, copy a Markdown link, and keep quotes and notes for each page in the side panel, exported as one Markdown file. On Wikipedia and MDN a small reading-time pill appears in the corner.
+Look at a page before you read it: reading time, word and link counts, and its outline, with a click to jump to any heading. Copy a Markdown link, save the outline as a file, and follow how far you've read in the side panel. The developer tools get a Page Lens panel with the same outline, and on Wikipedia and MDN a small reading-time pill appears in the corner.
 
 ```sh
 cd examples/page-lens
@@ -12,21 +12,22 @@ cargo oxichrome build --target firefox   # Firefox: load dist/firefox/manifest.j
 
 | Feature | Where |
 |---|---|
-| On-demand content scripts that take an argument and return a struct: `inspect`, `selection`, `scroll_to` | `src/page.rs` |
-| A content script that starts by itself on matching pages, with its own stylesheet (`css = [...]`) | `reading_pill` |
-| Messaging: the page script sends a typed message, the background answers with `send_response` and sets a badge on that tab | `message` in `src/lib.rs` |
-| `scripting::insert_css` and `remove_css`, remembered per tab in `storage::session` | `src/popup.rs` |
-| An offscreen document for the clipboard, called from the popup and from a menu | `copy` in `src/lib.rs` |
-| `ActiveTab`: the popup, the menus and the shortcut can read the current page with no host permission | `#[extension]` |
-| Asking for every site only when the user wants it, with `permissions::request_on_click` | `Notes` in `src/panel.rs` |
-| `downloads::save` for a file the extension made | `export` in `src/notes.rs` |
-| A menu on selected text with `%s` in the title, and one on pages and links | `save_quote`, `copy_link` |
-| A side panel that follows the tab you're looking at | `src/panel.rs` |
+| On-demand content scripts that take an argument and return a value: `inspect` returns a `PageInfo` struct, `scroll_to` takes a heading index | `src/page.rs` |
+| A content script that starts by itself on matching pages, with its own stylesheet (`css = ["pill.css"]`) | `reading_pill` in `src/page.rs` |
+| Typed messaging: the pill sends `Reading` with `runtime::request`, the background replies with an `Estimate` from its `#[on(runtime::on_message)]` handler and sets a badge on that tab | `reading` in `src/lib.rs` |
+| A typed port: the side panel opens `tabs::connect`, the page accepts it with `runtime::on_connect` and streams `Progress` as you scroll, closing it on `pagehide` (Firefox keeps the ports of a page in its back/forward cache open) | `follow` in `src/page.rs`, `src/panel.rs` |
+| An offscreen document for the clipboard, used by the popup and the menu | `copy` in `src/lib.rs` |
+| `ActiveTab`: the popup and the menu read the current page with no host permission | `#[extension]` in `src/lib.rs` |
+| An optional host permission asked for on click, with `permissions::request_on_click` | `src/panel.rs` |
+| `downloads::save` for a file the extension made | `save_outline` in `src/popup.rs` |
+| A context menu on pages and links | `copy_link` in `src/lib.rs` |
+| A side panel, opened from the popup with `side_panel::open_on_click` | `src/panel.rs` |
+| A devtools panel: `devtools::eval`, `inspected_tab_id`, refreshed on `on_shown` and `on_navigated`, retrying until the new page can run code | `src/devtools.rs` |
 
 ## Try it
 
 1. Open an article and click the toolbar button (or press <kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd>L</kbd>). Click a heading in the outline to jump to it.
-2. Turn on **Readable text**, then open the popup again: the switch remembers the tab.
-3. Select a sentence and right-click → **Save to Page Lens**, or press <kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd>Q</kbd>.
-4. Open **Notes**. **Add selection** asks once for access to all sites; until then, the menu and the shortcut still work through `ActiveTab`.
-5. Browser pages (`chrome://`, `about:`) and the extension stores can't be read by any extension, and the popup says so.
+2. Click **Save outline** to download it as Markdown, or right-click the page and pick **Copy link as Markdown**.
+3. Click **Reading progress** and scroll the page: the side panel follows along. On a tab you haven't opened the popup on, it asks for access to all sites first.
+4. Open the developer tools and pick the **Page Lens** panel.
+5. Open a Wikipedia article: the pill shows the reading time and the toolbar badge shows the minutes.
