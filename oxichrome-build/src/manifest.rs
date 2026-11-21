@@ -32,6 +32,8 @@ struct Manifest {
     #[serde(skip_serializing_if = "Option::is_none")]
     side_panel: Option<ChromeSidePanel>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    devtools_page: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     sidebar_action: Option<SidebarAction>,
     #[serde(skip_serializing_if = "Option::is_none")]
     omnibox: Option<ManifestOmnibox>,
@@ -247,6 +249,7 @@ pub fn generate_manifest(metadata: &ExtensionMetadata, browser: Browser) -> anyh
         } else {
             None
         },
+        devtools_page: (!metadata.devtools_panels.is_empty()).then(|| "devtools.html".to_string()),
         side_panel: match (&metadata.side_panel, browser) {
             (Some(_), Browser::Chromium) => Some(ChromeSidePanel {
                 default_path: "sidepanel.html".to_string(),
@@ -389,6 +392,20 @@ mod tests {
     }
 
     #[test]
+    fn devtools_page_in_both_browsers() {
+        let text = r#"{"kind":"extension","name":"T","version":"1.0.0","description":null,"gecko_id":null,"permissions":[],"host_permissions":[],"icons":[],"action":null}
+{"kind":"devtools_panel","fn_name":"Panel","export":"__oxichrome_mount_devtools_Panel","title":"Panel","icon":null,"styles":[],"file":"src/lib.rs","line":3,"column":1}"#;
+        let metadata = crate::metadata::parse_entries(text).unwrap();
+        for browser in [Browser::Chromium, Browser::Firefox] {
+            let manifest: serde_json::Value = serde_json::from_str(&generate_manifest(&metadata, browser).unwrap()).unwrap();
+            assert_eq!(manifest["devtools_page"], "devtools.html");
+        }
+        let none = crate::metadata::parse_entries(text.lines().next().unwrap()).unwrap();
+        let manifest: serde_json::Value = serde_json::from_str(&generate_manifest(&none, Browser::Chromium).unwrap()).unwrap();
+        assert!(manifest.get("devtools_page").is_none());
+    }
+
+    #[test]
     fn side_panel_keys_match_each_browser() {
         let source = r#"{"kind":"extension","name":"P","version":"1.0.0","description":null,"gecko_id":null,"permissions":["storage"],"host_permissions":[],"icons":[],"action":null}
 {"kind":"side_panel","fn_name":"Panel","title":"Notes","open_on_action_click":false}"#;
@@ -450,6 +467,7 @@ mod tests {
             has_popup: true,
             has_options_page: true,
             side_panel: None,
+            devtools_panels: Vec::new(),
             omnibox: None,
             popup_styles: Vec::new(),
             options_styles: Vec::new(),
@@ -504,6 +522,7 @@ mod tests {
             has_popup: false,
             has_options_page: false,
             side_panel: None,
+            devtools_panels: Vec::new(),
             omnibox: None,
             popup_styles: Vec::new(),
             options_styles: Vec::new(),
@@ -560,6 +579,7 @@ mod tests {
             has_popup: false,
             has_options_page: false,
             side_panel: None,
+            devtools_panels: Vec::new(),
             omnibox: None,
             popup_styles: Vec::new(),
             options_styles: Vec::new(),
@@ -643,6 +663,7 @@ mod tests {
             has_popup: false,
             has_options_page: false,
             side_panel: None,
+            devtools_panels: Vec::new(),
             omnibox: None,
             popup_styles: Vec::new(),
             options_styles: Vec::new(),

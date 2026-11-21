@@ -48,7 +48,7 @@ cargo oxichrome build --target firefox # Firefox
 - Tabs you can move, duplicate, discard, highlight and capture, and tab groups, the same in Chrome and Firefox
 - Typed web request events with URL and type filters, and answers to login challenges
 - User scripts, with typed messages from them, and a check of what the user still has to allow
-- Leptos for reactive popup, options page and side panel UI
+- Leptos for reactive popup, options page, side panel and devtools panel UI
 - `cargo oxichrome build` handles everything: compilation, wasm-bindgen, manifest generation, JS/HTML shim generation, static asset copying, optional wasm-opt
 - **`--target firefox`** generates a Firefox-compatible Manifest V3 extension
 - Separate `dist/chromium/` and `dist/firefox/` output directories
@@ -335,6 +335,56 @@ async fn opened(panel: side_panel::Panel) {} // panel.window_id
 #[oxichrome::on(side_panel::on_closed)]
 async fn closed(panel: side_panel::Panel) {}
 ```
+
+### `#[oxichrome::devtools_panel(...)]`
+
+Marks a Leptos component as a panel in the browser's developer tools, next to Elements and Console, in Chrome and Firefox. oxichrome writes the devtools page that adds the panels, a page for each one, and `devtools_page` in both manifests. No permission is needed.
+
+```rust
+use oxichrome::devtools::{self, Theme};
+
+#[derive(Deserialize)]
+struct Counts { links: u32, images: u32 }
+
+#[oxichrome::devtools_panel(title = "Page stats", icon = "icons/panel.png", style = "panel.css")]
+fn Stats() -> impl IntoView {
+    let (counts, set_counts) = signal(None::<(u32, u32)>);
+    let refresh = move || {
+        leptos::task::spawn_local(async move {
+            let code = "({ links: document.links.length, images: document.images.length })";
+            if let Ok(c) = devtools::eval::<Counts>(code).await {
+                set_counts.set(Some((c.links, c.images)));
+            }
+        });
+    };
+    let _ = devtools::on_shown(refresh);
+    let _ = devtools::on_navigated(move |_url| refresh());
+    view! {
+        <p>{move || counts.get().map(|(l, i)| format!("{l} links, {i} images"))}</p>
+        <button on:click=move |_| { let _ = devtools::reload(true); }>"Reload"</button>
+    }
+}
+```
+
+| Option | Description |
+|---|---|
+| `title` | Required. The panel's tab label; `t!("key")` works too. Chrome tells panels apart by title with spaces left out, so two panels can't share one. |
+| `icon` | A PNG in `static/`, shown next to the title in Chrome. |
+| `style` | Stylesheets, as for [the other pages](#styling-pages). |
+
+An extension can have several panels; they appear in the order they're written. In a panel page, `devtools` gives you:
+
+| Call | What it does |
+|---|---|
+| `inspected_tab_id()` | The tab these devtools inspect. |
+| `eval::<T>(code)` | Runs code in the page's own world (it sees the page's variables) and reads its last value as `T`. The value travels as JSON so both browsers give the same result: functions and `undefined` inside objects are dropped, and a promise isn't awaited. A throw is an error with its first line, like `the inspected page threw: Error: boom`. |
+| `reload(ignore_cache)` | Reloads the inspected page. |
+| `theme()` | `Theme::Light` or `Theme::Dark`. |
+| `on_shown`, `on_hidden` | The user opened or left this panel. Browsers show a panel before its page has loaded, so `on_shown` also runs right away when the panel is showing. |
+| `on_navigated(url)` | The inspected page went to a new URL. |
+| `on_request_finished(request)` | A request finished while the devtools were open: `url`, `method`, `status`, `mime_type` and `time` in milliseconds. |
+
+Outside a devtools panel these return an error, or `None`. The panel page can message the background like any extension page, with `runtime::request`.
 
 ### `#[oxichrome::omnibox(...)]`
 

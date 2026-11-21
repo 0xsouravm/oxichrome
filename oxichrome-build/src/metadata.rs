@@ -26,6 +26,7 @@ pub struct ExtensionMetadata {
     pub popup_styles: Vec<String>,
     pub options_styles: Vec<String>,
     pub side_panel: Option<SidePanel>,
+    pub devtools_panels: Vec<DevtoolsPanel>,
     pub omnibox: Option<Omnibox>,
     pub content_scripts: Vec<ContentScript>,
     pub gecko_id: Option<String>,
@@ -63,6 +64,23 @@ pub struct Omnibox {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+pub struct DevtoolsPanel {
+    pub fn_name: String,
+    pub export: String,
+    pub title: String,
+    pub icon: Option<String>,
+    #[serde(default)]
+    pub styles: Vec<String>,
+}
+
+impl DevtoolsPanel {
+    /// The panel's page in the extension, like `devtools-Panel.html`.
+    pub fn page(&self) -> String {
+        format!("devtools-{}.html", self.fn_name)
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq)]
 pub struct SidePanel {
     pub title: Option<String>,
     #[serde(default)]
@@ -242,6 +260,13 @@ enum Entry {
         #[serde(flatten)]
         panel: SidePanel,
     },
+    DevtoolsPanel {
+        #[serde(flatten)]
+        panel: DevtoolsPanel,
+        file: String,
+        line: usize,
+        column: usize,
+    },
     Omnibox(Omnibox),
     ContentScript {
         fn_name: String,
@@ -357,6 +382,7 @@ pub fn parse_entries(text: &str) -> anyhow::Result<ExtensionMetadata> {
     let mut popups = Vec::new();
     let mut options_pages = Vec::new();
     let mut side_panels: Vec<(String, SidePanel)> = Vec::new();
+    let mut devtools_panels: Vec<((String, usize, usize), DevtoolsPanel)> = Vec::new();
     let mut omniboxes: Vec<Omnibox> = Vec::new();
     let mut menus = Vec::new();
     let mut commands = Vec::new();
@@ -435,6 +461,7 @@ pub fn parse_entries(text: &str) -> anyhow::Result<ExtensionMetadata> {
                 options_pages.push(fn_name)
             }
             Entry::SidePanel { fn_name, panel } => side_panels.push((fn_name, panel)),
+            Entry::DevtoolsPanel { panel, file, line, column } => devtools_panels.push(((file, line, column), panel)),
             Entry::Omnibox(omnibox) => omniboxes.push(omnibox),
             Entry::ContentScript {
                 fn_name,
@@ -512,6 +539,20 @@ pub fn parse_entries(text: &str) -> anyhow::Result<ExtensionMetadata> {
         );
     }
     metadata.side_panel = side_panels.pop().map(|(_, panel)| panel);
+    devtools_panels.sort_by(|a, b| a.0.cmp(&b.0));
+    metadata.devtools_panels = devtools_panels.into_iter().map(|(_, panel)| panel).collect();
+    for (index, panel) in metadata.devtools_panels.iter().enumerate() {
+        let id = |title: &str| title.split_whitespace().collect::<String>();
+        if let Some(other) = metadata.devtools_panels[..index].iter().find(|other| id(&other.title) == id(&panel.title)) {
+            bail!(
+                "the devtools panels `{}` (`{}`) and `{}` (`{}`) have the same title once spaces are left out; Chrome tells panels apart that way, so give each its own",
+                other.fn_name,
+                other.title,
+                panel.fn_name,
+                panel.title
+            );
+        }
+    }
     omniboxes.sort_by(|a, b| a.fn_name.cmp(&b.fn_name));
     if omniboxes.len() > 1 {
         bail!(

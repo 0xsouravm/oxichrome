@@ -1794,3 +1794,61 @@ extern "C" {
     #[wasm_bindgen(catch)]
     pub fn user_scripts_call(method: &str, args: &js_sys::Array) -> Result<js_sys::Promise, JsValue>;
 }
+
+#[wasm_bindgen(inline_js = r#"
+const devtools = () => globalThis.chrome?.devtools;
+export function devtools_tab_id() { return devtools()?.inspectedWindow?.tabId; }
+export function devtools_theme() { return devtools()?.panels?.themeName; }
+export function devtools_eval(code) {
+    const api = devtools();
+    if (!api) { return Promise.reject(new Error('oxichrome:no-devtools')); }
+    // JSON on the page side, so both browsers hand back the same value.
+    const wrapped = '(() => { const value = eval(' + JSON.stringify(code) + '); return value === undefined ? undefined : JSON.stringify(value); })()';
+    return new Promise((resolve, reject) => {
+        api.inspectedWindow.eval(wrapped, (result, info) => {
+            if (info && info.isException) { reject(new Error('oxichrome:threw:' + String(info.value))); }
+            else if (info && info.isError) { reject(new Error('oxichrome:refused:' + [info.description, ...(info.details || [])].join(' '))); }
+            else { resolve(result === undefined ? 'null' : result); }
+        });
+    });
+}
+export function devtools_reload(ignoreCache) {
+    const api = devtools();
+    if (!api) { return false; }
+    api.inspectedWindow.reload({ ignoreCache });
+    return true;
+}
+export function devtools_listen(kind, callback) {
+    const api = devtools();
+    if (!api) { return undefined; }
+    if (kind === 'shown' || kind === 'hidden') {
+        const name = 'oxichrome-devtools-' + kind;
+        const listener = () => callback();
+        window.addEventListener(name, listener);
+        // The panel is usually shown before its wasm loads, so a new shown listener runs at once.
+        if (kind === 'shown' && window.__oxichromeDevtoolsShown) { queueMicrotask(listener); }
+        return () => window.removeEventListener(name, listener);
+    }
+    if (kind === 'navigated') {
+        const listener = (url) => callback(url);
+        api.network.onNavigated.addListener(listener);
+        return () => api.network.onNavigated.removeListener(listener);
+    }
+    const listener = (entry) => callback({
+        url: entry?.request?.url ?? '',
+        method: entry?.request?.method ?? '',
+        status: entry?.response?.status ?? 0,
+        mimeType: entry?.response?.content?.mimeType ?? null,
+        time: entry?.time ?? null,
+    });
+    api.network.onRequestFinished.addListener(listener);
+    return () => api.network.onRequestFinished.removeListener(listener);
+}
+"#)]
+extern "C" {
+    pub fn devtools_tab_id() -> JsValue;
+    pub fn devtools_theme() -> JsValue;
+    pub fn devtools_eval(code: &str) -> js_sys::Promise;
+    pub fn devtools_reload(ignore_cache: bool) -> bool;
+    pub fn devtools_listen(kind: &str, callback: &JsValue) -> JsValue;
+}
