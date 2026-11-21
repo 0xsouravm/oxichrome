@@ -285,6 +285,87 @@ pub fn left_out_events(metadata: &ExtensionMetadata, browser: crate::Browser) ->
     left_out
 }
 
+/// Must match `port_wrap` in oxichrome-core's js_bridge.rs (checked by a test).
+const PORT_WRAPPER: &str = r#"const portGroups = new WeakMap();
+
+function wrapPort(raw) {
+    if (raw && raw.__oxichrome_port === true) {
+        return raw;
+    }
+    let group = portGroups.get(raw);
+    if (!group) {
+        group = [];
+        portGroups.set(raw, group);
+    }
+    const queue = [];
+    const waiters = [];
+    const closedWaiters = [];
+    let open = true;
+    let reason = null;
+    const close = (why) => {
+        if (!open) {
+            return;
+        }
+        open = false;
+        reason = why;
+        waiters.splice(0).forEach((resolve) => resolve(undefined));
+        closedWaiters.splice(0).forEach((resolve) => resolve(reason));
+    };
+    const port = {
+        __oxichrome_port: true,
+        close,
+        name: raw.name,
+        sender: raw.sender,
+        next() {
+            if (queue.length > 0) {
+                return Promise.resolve({ value: queue.shift() });
+            }
+            if (!open) {
+                return Promise.resolve(undefined);
+            }
+            return new Promise((resolve) => waiters.push(resolve));
+        },
+        post(message) {
+            if (!open) {
+                throw new Error('the port is closed');
+            }
+            raw.postMessage(message);
+        },
+        disconnect() {
+            if (!open) {
+                return;
+            }
+            group.forEach((other) => other.close(null));
+            raw.disconnect();
+        },
+        isOpen() {
+            return open;
+        },
+        closed() {
+            return open ? new Promise((resolve) => closedWaiters.push(resolve)) : Promise.resolve(reason);
+        },
+    };
+    group.push(port);
+    raw.onMessage.addListener((message) => {
+        if (!open) {
+            return;
+        }
+        const waiter = waiters.shift();
+        if (waiter) {
+            waiter({ value: message });
+        } else {
+            queue.push(message);
+        }
+    });
+    raw.onDisconnect.addListener((p) => {
+        const lastError = globalThis.chrome?.runtime?.lastError;
+        close((p && p.error && p.error.message) || (lastError && lastError.message) || null);
+    });
+    return port;
+}
+
+"#;
+
 fn generate_listeners(metadata: &ExtensionMetadata) -> String {
     let mut events: Vec<(String, Vec<String>)> = Vec::new();
     for handler in &metadata.event_handlers {
@@ -350,16 +431,34 @@ self.addEventListener('unhandledrejection', (event) => releaseRepliesOnTrap(even
     if (isInternalMessage(args[0])) {{
         return;
     }}
-    const reply = args[2];
+    const respond = args[2];
+    let replied = false;
+    const reply = (value) => {{
+        if (replied) {{
+            return false;
+        }}
+        replied = true;
+        openReplies.delete(reply);
+        respond(value);
+        return true;
+    }};
+    args[2] = reply;
     openReplies.add(reply);
     dispatch(() => {{
         Promise.allSettled([{handlers}].map(async (handler) => handler(...args)))
-            .then(() => {{
-                openReplies.delete(reply);
-                reply();
-            }});
+            .then(() => reply());
     }});
     return true;
+}});
+"#
+            ));
+        } else if event == "chrome.runtime.onConnect" {
+            listeners.push_str(PORT_WRAPPER);
+            listeners.push_str(&format!(
+                r#"{event}.addListener((raw) => {{
+    const handlers = [{handlers}];
+    const ports = handlers.map(() => wrapPort(raw));
+    dispatch(() => handlers.forEach((handler, i) => handler(ports[i])));
 }});
 "#
             ));
@@ -1455,7 +1554,7 @@ mod tests {
         let skip = js[listener..]
             .find("if (isInternalMessage(args[0]))")
             .unwrap();
-        let reply = js[listener..].find("const reply = args[2];").unwrap();
+        let reply = js[listener..].find("const respond = args[2];").unwrap();
         assert!(skip < reply);
     }
 
@@ -1745,5 +1844,33 @@ mod tests {
             assert!(base < first && first < second && second < html.find("</head>").unwrap(), "{html}");
         }
         assert!(!generate_popup_html(&[]).contains("<link"));
+    }
+
+    #[test]
+    fn background_port_wrapper_matches_the_core_one() {
+        let core = include_str!("../../oxichrome-core/src/js_bridge.rs");
+        let start = core.find("const portGroups = new WeakMap();").unwrap();
+        let end = core.find("export function port_name").unwrap();
+        let expected = core[start..end].trim_end().replace("export function port_wrap(raw)", "function wrapPort(raw)");
+        assert_eq!(PORT_WRAPPER.trim_end(), expected);
+    }
+
+    #[test]
+    fn connect_handlers_get_their_own_buffered_port() {
+        let metadata = metadata_with_handlers(&[("a", "runtime", "on_connect"), ("b", "runtime", "on_connect")]);
+        let js = generate_background_js(&metadata, "ext");
+        let listener = js.find("chrome.runtime.onConnect.addListener((raw)").unwrap();
+        assert!(js.find("function wrapPort(raw)").unwrap() < listener);
+        assert!(js[listener..].contains("handlers.map(() => wrapPort(raw))"));
+        assert_eq!(js.matches("function wrapPort").count(), 1);
+    }
+
+    #[test]
+    fn message_replies_are_sent_once() {
+        let metadata = metadata_with_handlers(&[("msg", "runtime", "on_message")]);
+        let js = generate_background_js(&metadata, "ext");
+        assert!(js.contains("if (replied) {"));
+        assert!(js.contains("args[2] = reply;"));
+        assert!(js.contains(".then(() => reply());"));
     }
 }

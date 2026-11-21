@@ -44,6 +44,7 @@ cargo oxichrome build --target firefox # Firefox
 
 - Proc macros (`#[extension]`, `#[background]`, `#[on]`, `#[popup]`, `#[options_page]`, `#[side_panel]`, `#[content_script]`, `#[menu]`, `#[submenu]`, `#[command]`) transform your Rust into wasm-bindgen exports
 - Typed bindings to `chrome.storage`, `chrome.tabs`, `chrome.runtime`
+- Typed messages and ports between the background, pages and content scripts, routed by message type
 - Leptos for reactive popup, options page and side panel UI
 - `cargo oxichrome build` handles everything: compilation, wasm-bindgen, manifest generation, JS/HTML shim generation, static asset copying, optional wasm-opt
 - **`--target firefox`** generates a Firefox-compatible Manifest V3 extension
@@ -201,9 +202,13 @@ async fn start() {
 Registers an async function as a Chrome event listener.
 
 ```rust
+use oxichrome::runtime::{InstallReason, InstalledDetails};
+
 #[oxichrome::on(runtime::on_installed)]
-async fn on_install(details: oxichrome::__private::wasm_bindgen::JsValue) {
-    oxichrome::log!("Installed: {:?}", details);
+async fn on_install(details: InstalledDetails) {
+    if details.reason == InstallReason::Update {
+        oxichrome::log!("Updated from {:?}", details.previous_version);
+    }
 }
 ```
 
@@ -222,12 +227,17 @@ Listeners are registered synchronously when the background script starts, and ev
 
 | Event | Typed arguments |
 |---|---|
+| `runtime::on_installed` | `runtime::InstalledDetails` |
+| `runtime::on_message` | your message type, `runtime::MessageSender`, `runtime::Reply` (see [Messaging](#messaging)) |
+| `runtime::on_connect` | `runtime::Port` |
 | `alarms::on_alarm` | `alarms::Alarm` |
 | `notifications::on_clicked` | `id: String` |
 | `notifications::on_closed` | `id: String, by_user: Option<bool>` |
 | `notifications::on_button_clicked` | `id: String, index: u32` |
 
-`#[on(runtime::on_message)]` handlers receive `(message, sender, send_response)`. Call `send_response` to reply, including after an `.await`. If no handler replies, the sender gets an empty response (`null` in Chrome, `undefined` in Firefox) once every handler has finished.
+`InstalledDetails` has `reason` (`Install`, `Update`, `BrowserUpdate`, `SharedModuleUpdate`), `previous_version` for an update, and `temporary`, which is `true` for a temporary add-on in Firefox. `runtime::reload()` counts as an `Update` from the same version.
+
+`runtime::on_message` and `runtime::on_connect` are covered in [Messaging](#messaging).
 
 ### `#[oxichrome::popup]`
 
@@ -699,6 +709,73 @@ let detected = oxichrome::i18n::detect_language(&page_text).await?; // .is_relia
 
 `Extension::name()` returns the `default_locale` text of a translated name.
 
+## Messaging
+
+The background, extension pages and content scripts talk with messages. Give each kind of message its own type, and the type decides which handler gets it.
+
+```rust
+use oxichrome::runtime::{self, MessageSender};
+
+#[derive(Serialize, Deserialize)]
+#[serde(tag = "kind")]
+enum Ask {
+    Count { word: String },
+    Clear,
+}
+
+#[oxichrome::on(runtime::on_message)]
+async fn ask(ask: Ask, sender: MessageSender) -> u32 {
+    match ask {
+        Ask::Count { word } => word.len() as u32,
+        Ask::Clear => 0,
+    }
+}
+
+// in the popup, an options page, a side panel or a content script
+let n: u32 = runtime::request(&Ask::Count { word: "hello".into() }).await?;
+```
+
+- **The message type routes.** A handler runs only for messages that read as its first argument's type. Others skip it, so several handlers with different types can share `on_message`. Use `JsValue` to see every message.
+- **The return value is the reply.** It can be any `Serialize` type, including `Option` and `Result`. A handler that returns nothing doesn't reply. When several handlers reply, the first one wins, in the background and across pages.
+- **Nobody replied.** When every handler finishes without replying (or panics), the sender gets an empty reply instead of waiting forever. Read it as `Option<T>` to get `None`; reading it as `T` returns an `Err` that says nobody replied.
+- **`MessageSender`** has `url`, `origin`, `tab`, `frame_id`, `document_id` and the extension `id`, the same in both browsers. `is_content_script()` tells a web page apart from your own pages.
+- **`Reply`** as the third argument replies before the handler finishes: `reply.send(&value)?` returns `Ok(false)` when a reply already went out.
+- **Pages and content scripts** answer with `runtime::listen`, which works the same way: messages of another type are left for other listeners, and the return value is the reply. It keeps listening until you call `remove()` on what it returns.
+
+```rust
+// in a content script
+let _ = runtime::listen(|ask: Highlight, _sender: MessageSender| async move {
+    highlight(&ask.word)
+});
+
+// in the background
+let found: usize = oxichrome::tabs::request(tab_id, &Highlight { word: "rust".into() }).await?;
+let in_frame: usize = oxichrome::tabs::request_frame(tab_id, frame_id, &Highlight { word: "rust".into() }).await?;
+```
+
+`runtime::request` reaches the background and every open extension page; `tabs::request` reaches the content scripts in a tab. The background never receives its own messages. When nothing is listening (no content script in that tab, a missing frame, or the background asking itself), the `Err` says so. `runtime::send_message` and `tabs::send_message` still return the raw `JsValue` reply.
+
+**Ports** keep a connection open for a stream of messages:
+
+```rust
+use oxichrome::runtime::Port;
+
+#[oxichrome::on(runtime::on_connect)]
+async fn connected(port: Port) {
+    while let Some(Ok(line)) = port.recv::<String>().await {
+        let _ = port.post(&line.to_uppercase());
+    }
+}
+
+// in a page or content script
+let port = runtime::connect("shout")?;
+port.post("hello")?;
+let answer: Option<oxichrome::Result<String>> = port.recv().await;    // None once the port is closed
+port.disconnect();
+```
+
+`runtime::connect(name)` opens a port to the background and extension pages, and `tabs::connect(tab_id, name, frame_id)` to a tab's content scripts. Pages and content scripts accept ports with `runtime::on_connect(|port| async move { ... })`. Messages sent before the other side starts reading are kept in order. `recv` returns `None` once either side disconnects and every message has been read, and `closed().await` waits for that: `Ok(())` for a normal close, `Err` when nothing was listening. Each `on_connect` handler gets every message. The background can stop while a port is open (Chrome stops an idle service worker, Firefox an idle event page), which closes the port; a new `request` or `connect` starts it again.
+
 ## Chrome APIs
 
 ```rust
@@ -808,7 +885,12 @@ let on: Vec<String> = dnr::enabled_rule_sets().await?;               // sorted
 
 // Runtime
 let url = oxichrome::runtime::get_url("icon.png");
-oxichrome::runtime::send_message(&msg).await?;
+let id: String = oxichrome::runtime::id();                            // the gecko id in Firefox
+let manifest: serde_json::Value = oxichrome::runtime::get_manifest();
+let platform = oxichrome::runtime::get_platform_info().await?;        // os: Mac, Windows, Linux, ...; arch: Arm64, X86_64, ...
+oxichrome::runtime::open_options_page().await?;                       // Err when there is no #[oxichrome::options_page]
+oxichrome::runtime::set_uninstall_url("https://example.org/bye").await?; // http or https, at most 1023 characters; "" for none
+oxichrome::runtime::reload();
 
 // Action
 oxichrome::action::set_badge_text("3", None).await?;

@@ -86,6 +86,7 @@ pub trait Event {
 pub mod events {
     pub struct RuntimeOnInstalled;
     pub struct RuntimeOnMessage;
+    pub struct RuntimeOnConnect;
     pub struct StorageOnChanged;
     pub struct TabsOnUpdated;
     pub struct TabsOnRemoved;
@@ -142,6 +143,7 @@ macro_rules! arity {
 arity! {
     RuntimeOnInstalled = 1,
     RuntimeOnMessage = 3,
+    RuntimeOnConnect = 1,
     StorageOnChanged = 2,
     TabsOnUpdated = 3,
     TabsOnRemoved = 2,

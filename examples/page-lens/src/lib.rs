@@ -7,7 +7,8 @@ mod ui;
 use oxichrome::commands::Press;
 use oxichrome::context_menus::Click;
 use oxichrome::prelude::*;
-use wasm_bindgen::{JsCast, JsValue};
+
+use wasm_bindgen::JsCast;
 
 use crate::notes::Kind;
 use crate::page::{Reading, ReadingReply};
@@ -43,24 +44,15 @@ pub async fn copy_text(text: String) -> Result<()> {
     }
 }
 
-fn sender_tab(sender: &JsValue) -> Option<i32> {
-    let tab = js_sys::Reflect::get(sender, &"tab".into()).ok()?;
-    js_sys::Reflect::get(&tab, &"id".into()).ok()?.as_f64().map(|id| id as i32)
-}
-
 #[on(runtime::on_message)]
-async fn message(message: JsValue, sender: JsValue, reply: JsValue) {
-    let Ok(reading) = serde_wasm_bindgen::from_value::<Reading>(message) else { return };
+async fn message(reading: Reading, sender: runtime::MessageSender) -> ReadingReply {
     let settings = notes::settings().await;
-    if let Some(tab_id) = sender_tab(&sender) {
+    if let Some(tab_id) = sender.tab.and_then(|tab| tab.id) {
         let _ = action::set_badge_background_color("#18a06e", Some(tab_id)).await;
         let _ = action::set_badge_text(&format!("{}m", reading.minutes), Some(tab_id)).await;
         let _ = action::set_title(&format!("Page Lens · {} min read", reading.minutes), Some(tab_id)).await;
     }
-    let answer = serde_wasm_bindgen::to_value(&ReadingReply { show_pill: settings.show_pill }).unwrap_or(JsValue::NULL);
-    if let Some(reply) = reply.dyn_ref::<js_sys::Function>() {
-        let _ = reply.call1(&JsValue::NULL, &answer);
-    }
+    ReadingReply { show_pill: settings.show_pill }
 }
 
 async fn tab_title(tab_id: Option<i32>) -> String {

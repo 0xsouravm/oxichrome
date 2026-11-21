@@ -79,9 +79,17 @@ pub fn expand(attr: TokenStream, item: TokenStream, order: crate::codegen::Order
 
     let js_type = quote! { oxichrome::__private::wasm_bindgen::JsValue };
 
-    let raw_args: Vec<_> = (0..arg_types.len())
+    let is_message = namespace == "runtime" && event_name == "on_message";
+    let replies = is_message
+        && match &func.sig.output {
+            syn::ReturnType::Default => false,
+            syn::ReturnType::Type(_, ty) => !matches!(ty.as_ref(), syn::Type::Tuple(tuple) if tuple.elems.is_empty()),
+        };
+    let raw_count = if replies { 3 } else { arg_types.len() };
+    let raw_args: Vec<_> = (0..raw_count)
         .map(|i| format_ident!("__oxichrome_arg{}", i))
         .collect();
+    let call_args = &raw_args[..arg_types.len()];
 
     let conversions = raw_args
         .iter()
@@ -90,6 +98,18 @@ pub fn expand(attr: TokenStream, item: TokenStream, order: crate::codegen::Order
         .map(|(i, (raw, ty))| {
             let position = i + 1;
             let handler = fn_name.to_string();
+            if is_message && position == 1 {
+                return quote! {
+                    let #raw: #ty = {
+                        #[allow(unused_imports)]
+                        use oxichrome::core::runtime::{__MessageAsJs as _, __MessageAsSerde as _};
+                        match (&oxichrome::core::runtime::__MessageProbe::<#ty>(::core::marker::PhantomData)).__read(#raw) {
+                            ::core::option::Option::Some(message) => message,
+                            ::core::option::Option::None => return Ok(#js_type::UNDEFINED),
+                        }
+                    };
+                };
+            }
             quote! {
                 let #raw = <#ty as oxichrome::core::event::FromEventArg>::from_event_arg(#raw)
                     .map_err(|err| {
@@ -116,7 +136,14 @@ pub fn expand(attr: TokenStream, item: TokenStream, order: crate::codegen::Order
             .collect::<String>()
     };
     let marker = format_ident!("{}{}", camel(namespace), camel(event_name));
-    let arg_checks = arg_types.iter().enumerate().map(|(i, ty)| {
+    let is_js_value = |ty: &syn::Type| matches!(ty, syn::Type::Path(path) if path.path.segments.last().is_some_and(|segment| segment.ident == "JsValue"));
+    let message_check = match arg_types.first() {
+        Some(ty) if is_message && !is_js_value(ty) => quote_spanned! {ty.span()=>
+            oxichrome::core::runtime::__assert_message::<#ty>();
+        },
+        _ => quote! {},
+    };
+    let arg_checks = arg_types.iter().enumerate().filter(|(i, _)| !(is_message && *i == 0)).map(|(i, ty)| {
         let position = i + 1;
         quote_spanned! {ty.span()=>
             oxichrome::core::event::assert_arg::<#ty, oxichrome::core::event::events::#marker, #position>();
@@ -127,6 +154,20 @@ pub fn expand(attr: TokenStream, item: TokenStream, order: crate::codegen::Order
     let too_many = format!(
         "`{fn_name}` takes {arg_count} arguments, more than `{namespace}::{event_name}` passes; remove the extra ones"
     );
+
+    let keep_reply = if replies {
+        quote! { let __oxichrome_reply = __oxichrome_arg2.clone(); }
+    } else {
+        quote! {}
+    };
+    let call = if replies {
+        quote! {
+            let __oxichrome_value = #fn_name(#(#call_args),*).await;
+            oxichrome::core::runtime::__reply(&__oxichrome_reply, &__oxichrome_value)?;
+        }
+    } else {
+        quote! { #fn_name(#(#call_args),*).await; }
+    };
 
     let entry = metadata::emit(serde_json::json!({
         "kind": "event",
@@ -145,6 +186,7 @@ pub fn expand(attr: TokenStream, item: TokenStream, order: crate::codegen::Order
         #[allow(dead_code)]
         fn #check_fn_name() {
             let _ = oxichrome::core::js_bridge::#bridge_fn_name;
+            #message_check
             #(#arg_checks)*
         }
 
@@ -158,8 +200,9 @@ pub fn expand(attr: TokenStream, item: TokenStream, order: crate::codegen::Order
         #[oxichrome::__private::wasm_bindgen::prelude::wasm_bindgen(wasm_bindgen = oxichrome::__private::wasm_bindgen, wasm_bindgen_futures = oxichrome::__private::wasm_bindgen_futures)]
         pub fn #export_fn_name(#(#raw_args: #js_type),*) -> oxichrome::__private::js_sys::Promise {
             oxichrome::__private::wasm_bindgen_futures::future_to_promise(async move {
+                #keep_reply
                 #(#conversions)*
-                #fn_name(#(#raw_args),*).await;
+                #call
                 Ok(#js_type::UNDEFINED)
             })
         }
