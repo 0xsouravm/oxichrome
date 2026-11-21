@@ -153,6 +153,16 @@ pub struct EventHandler {
     pub export: String,
     pub namespace: String,
     pub event_name: String,
+    /// The URL and type filter of a `web_request` handler.
+    #[serde(default)]
+    pub filter: Option<RequestFilter>,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+pub struct RequestFilter {
+    pub urls: Vec<String>,
+    #[serde(default)]
+    pub types: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -214,6 +224,8 @@ enum Entry {
         export: String,
         namespace: String,
         event_name: String,
+        #[serde(default)]
+        filter: Option<RequestFilter>,
     },
     Popup {
         fn_name: String,
@@ -406,11 +418,13 @@ pub fn parse_entries(text: &str) -> anyhow::Result<ExtensionMetadata> {
                 export,
                 namespace,
                 event_name,
+                filter,
             } => metadata.event_handlers.push(EventHandler {
                 fn_name,
                 export,
                 namespace,
                 event_name,
+                filter,
             }),
             Entry::Popup { fn_name, styles } => {
                 metadata.popup_styles = styles;
@@ -543,6 +557,23 @@ fn check_event_permissions(metadata: &ExtensionMetadata) -> anyhow::Result<()> {
     check_event_permission(metadata, "web_navigation", "webNavigation", "WebNavigation")?;
     check_event_permission(metadata, "bookmarks", "bookmarks", "Bookmarks")?;
     check_event_permission(metadata, "history", "history", "History")?;
+    check_web_request(metadata)?;
+    Ok(())
+}
+
+fn check_web_request(metadata: &ExtensionMetadata) -> anyhow::Result<()> {
+    let listed = check_event_permission(metadata, "web_request", "webRequest", "WebRequest")?;
+    if listed && metadata.event_handlers.iter().any(|handler| handler.namespace == "web_request") && metadata.host_permissions.is_empty() && metadata.optional_host_permissions.is_empty() {
+        bail!("`web_request` events only report requests to sites the extension has host permission for; add them to `host_permissions` in #[oxichrome::extension], like `\"https://example.com/*\"`");
+    }
+    let auth: Vec<&EventHandler> = metadata.event_handlers.iter().filter(|handler| handler.namespace == "web_request" && handler.event_name == "on_auth_required").collect();
+    if auth.len() > 1 {
+        bail!(
+            "`{}` and `{}` both answer `web_request::on_auth_required`; keep one handler and decide there, since the browser takes only one answer",
+            auth[0].fn_name,
+            auth[1].fn_name
+        );
+    }
     Ok(())
 }
 

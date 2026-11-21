@@ -31,6 +31,7 @@ pub use oxichrome_core::tab_groups;
 pub use oxichrome_core::tabs;
 pub use oxichrome_core::top_sites;
 pub use oxichrome_core::web_navigation;
+pub use oxichrome_core::web_request;
 pub use oxichrome_core::windows;
 
 pub use oxichrome_core::log;

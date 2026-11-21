@@ -28,6 +28,7 @@ pub mod tab_groups;
 pub mod tabs;
 pub mod top_sites;
 pub mod web_navigation;
+pub mod web_request;
 pub mod windows;
 
 pub use js_bridge::__log_impl;

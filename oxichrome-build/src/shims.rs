@@ -1,6 +1,6 @@
 //! Generates JS shims and HTML shells for loading WASM in Chrome extensions.
 
-use crate::metadata::ExtensionMetadata;
+use crate::metadata::{EventHandler, ExtensionMetadata};
 
 fn snake_to_camel(name: &str) -> String {
     let mut parts = name.split('_');
@@ -386,6 +386,11 @@ fn generate_listeners(metadata: &ExtensionMetadata) -> String {
         Some((_, chunk)) => chunk.push_str(&js),
         None => chunks.push((namespace.to_string(), js)),
     };
+    let requests: Vec<&EventHandler> = metadata.event_handlers.iter().filter(|handler| handler.namespace == "web_request").collect();
+    events.retain(|(event, _)| !event.starts_with("chrome.webRequest."));
+    if !requests.is_empty() {
+        add("webRequest", generate_web_request(&requests));
+    }
     let navigation: Vec<(String, Vec<String>)> = events
         .iter()
         .filter(|(event, _)| event.starts_with("chrome.webNavigation."))
@@ -597,6 +602,97 @@ chrome.windows?.onRemoved?.addListener((id) => highlightedSeen.delete(id));
     }
     listeners
 }
+
+fn generate_web_request(handlers: &[&EventHandler]) -> String {
+    let mut js = String::from(WEB_REQUEST_HELPERS);
+    let auth = handlers.iter().any(|handler| handler.event_name == "on_auth_required");
+    for handler in handlers {
+        let event = snake_to_camel(&handler.event_name);
+        let filter = handler.filter.clone().unwrap_or(crate::metadata::RequestFilter { urls: vec!["<all_urls>".to_string()], types: Vec::new() });
+        let mut object = serde_json::json!({ "urls": filter.urls });
+        if !filter.types.is_empty() {
+            object["types"] = serde_json::json!(filter.types);
+        }
+        let export = &handler.export;
+        if handler.event_name == "on_auth_required" {
+            js.push_str(&format!("wrListen('onAuthRequired', {object}, (details, callback) => wrAnswer(details, callback, {export}));\n"));
+        } else if handler.event_name == "on_error_occurred" && auth {
+            js.push_str(&format!(
+                "wrListen('onErrorOccurred', {object}, (details) => {{\n    details.__oxichrome_auth_gave_up = wrGaveUp.has(details.requestId);\n    dispatch(() => {export}(details, details));\n}});\n"
+            ));
+        } else {
+            js.push_str(&format!("wrListen('{event}', {object}, (details) => dispatch(() => {export}(details, details)));\n"));
+        }
+    }
+    if auth {
+        js.push_str(WEB_REQUEST_AUTH_CLEANUP);
+    }
+    js
+}
+
+const WEB_REQUEST_HELPERS: &str = r#"const wrFirefox = typeof globalThis.browser?.runtime?.getBrowserInfo === 'function';
+const wrExtra = wrFirefox ? [] : ['extraHeaders'];
+const wrSpecs = {
+    onBeforeRequest: ['requestBody'],
+    onBeforeSendHeaders: ['requestHeaders', ...wrExtra],
+    onSendHeaders: ['requestHeaders', ...wrExtra],
+    onHeadersReceived: ['responseHeaders', ...wrExtra],
+    onResponseStarted: ['responseHeaders', ...wrExtra],
+    onBeforeRedirect: ['responseHeaders', ...wrExtra],
+    onCompleted: ['responseHeaders', ...wrExtra],
+    onErrorOccurred: wrExtra.length ? wrExtra : null,
+    onAuthRequired: ['responseHeaders', ...wrExtra, wrFirefox ? 'blocking' : 'asyncBlocking'],
+};
+const wrFirefoxTypes = { image: ['imageset'], ping: ['beacon'], object: ['object_subrequest'] };
+
+function wrListen(event, filter, listener) {
+    if (wrFirefox && filter.types) {
+        filter.types = filter.types.flatMap((type) => [type, ...(wrFirefoxTypes[type] ?? [])]);
+    }
+    const spec = wrSpecs[event];
+    if (spec) {
+        chrome.webRequest[event].addListener(listener, filter, spec);
+    } else {
+        chrome.webRequest[event].addListener(listener, filter);
+    }
+}
+
+const WR_MAX_AUTH_ATTEMPTS = 3;
+const wrAttempts = new Map();
+const wrGaveUp = new Set();
+
+function wrAnswer(details, callback, handler) {
+    const attempt = (wrAttempts.get(details.requestId) ?? 0) + 1;
+    wrAttempts.set(details.requestId, attempt);
+    details.__oxichrome_attempt = attempt;
+    const answer = new Promise((resolve) => {
+        if (attempt > WR_MAX_AUTH_ATTEMPTS) {
+            wrGaveUp.add(details.requestId);
+            resolve({ cancel: true });
+            return;
+        }
+        dispatch(() => Promise.resolve(handler(details, details)).then(
+            (reply) => resolve(reply ?? {}),
+            (error) => {
+                console.error('[oxichrome] on_auth_required handler failed, so the browser asks the user:', error);
+                resolve({});
+            },
+        ));
+    });
+    if (wrFirefox) {
+        return answer;
+    }
+    answer.then(callback);
+}
+"#;
+
+const WEB_REQUEST_AUTH_CLEANUP: &str = r#"const wrForget = (details) => setTimeout(() => {
+    wrAttempts.delete(details.requestId);
+    wrGaveUp.delete(details.requestId);
+}, 5000);
+chrome.webRequest.onCompleted.addListener(wrForget, { urls: ['<all_urls>'] });
+chrome.webRequest.onErrorOccurred.addListener(wrForget, { urls: ['<all_urls>'] });
+"#;
 
 const ATTACH_HELPER: &str = r#"const attached = new Set();
 
@@ -1423,7 +1519,8 @@ mod tests {
             export: "__oxichrome_on_handle_install".to_string(),
                 namespace: "runtime".to_string(),
                 event_name: "on_installed".to_string(),
-                }],
+                filter: None,
+            }],
             has_popup: false,
             has_options_page: false,
             side_panel: None,
@@ -1476,6 +1573,7 @@ mod tests {
                     export: format!("__oxichrome_on_{fn_name}"),
                     namespace: namespace.to_string(),
                     event_name: event_name.to_string(),
+                    filter: None,
                 })
                 .collect(),
             has_popup: false,
@@ -1895,4 +1993,41 @@ mod tests {
         assert!(js.contains("if (highlightedSeen.get(info.windowId) === key) {"));
         assert!(js.contains("attach('tabs', () => {"));
     }
+
+    fn request_handler(fn_name: &str, event_name: &str, filter: Option<crate::metadata::RequestFilter>) -> EventHandler {
+        EventHandler {
+            fn_name: fn_name.to_string(),
+            export: format!("__oxichrome_on_{fn_name}"),
+            namespace: "web_request".to_string(),
+            event_name: event_name.to_string(),
+            filter,
+        }
+    }
+
+    #[test]
+    fn web_request_handlers_get_their_own_filter() {
+        let mut metadata = metadata_with_handlers(&[]);
+        metadata.event_handlers = vec![
+            request_handler("done", "on_completed", Some(crate::metadata::RequestFilter { urls: vec!["https://a.example/*".into()], types: vec!["image".into()] })),
+            request_handler("all", "on_completed", None),
+            request_handler("failed", "on_error_occurred", None),
+        ];
+        let js = generate_background_js(&metadata, "ext");
+        assert!(js.contains(r#"wrListen('onCompleted', {"types":["image"],"urls":["https://a.example/*"]}, (details) => dispatch(() => __oxichrome_on_done(details, details)));"#), "{js}");
+        assert!(js.contains(r#"wrListen('onCompleted', {"urls":["<all_urls>"]}, (details) => dispatch(() => __oxichrome_on_all(details, details)));"#));
+        assert!(js.contains("attach('webRequest', () => {"));
+        assert!(!js.contains("wrForget"));
+    }
+
+    #[test]
+    fn auth_answers_once_per_challenge_and_gives_up() {
+        let mut metadata = metadata_with_handlers(&[]);
+        metadata.event_handlers = vec![request_handler("login", "on_auth_required", None), request_handler("failed", "on_error_occurred", None)];
+        let js = generate_background_js(&metadata, "ext");
+        assert!(js.contains("(details, callback) => wrAnswer(details, callback, __oxichrome_on_login)"));
+        assert!(js.contains("details.__oxichrome_auth_gave_up = wrGaveUp.has(details.requestId);"));
+        assert!(js.contains("const WR_MAX_AUTH_ATTEMPTS = 3;"));
+        assert!(js.contains("chrome.webRequest.onCompleted.addListener(wrForget"));
+    }
+
 }

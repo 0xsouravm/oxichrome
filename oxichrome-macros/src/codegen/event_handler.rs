@@ -47,6 +47,12 @@ pub fn expand(attr: TokenStream, item: TokenStream, order: crate::codegen::Order
         Err(crate::events::Unknown::Event(message)) => return Err(syn::Error::new_spanned(&args.event_name, message)),
     }
 
+    if let Some(filter) = &args.filter {
+        if args.namespace != "web_request" {
+            return Err(syn::Error::new(filter.span, format!("only `web_request` events take a filter; `{}::{}` takes just the event", args.namespace, args.event_name)));
+        }
+    }
+
     if func.sig.asyncness.is_none() {
         return Err(syn::Error::new_spanned(
             &func.sig.fn_token,
@@ -85,6 +91,15 @@ pub fn expand(attr: TokenStream, item: TokenStream, order: crate::codegen::Order
             syn::ReturnType::Default => false,
             syn::ReturnType::Type(_, ty) => !matches!(ty.as_ref(), syn::Type::Tuple(tuple) if tuple.elems.is_empty()),
         };
+    let is_auth = namespace == "web_request" && event_name == "on_auth_required";
+    let has_return = !matches!(&func.sig.output, syn::ReturnType::Default)
+        && !matches!(&func.sig.output, syn::ReturnType::Type(_, ty) if matches!(ty.as_ref(), syn::Type::Tuple(tuple) if tuple.elems.is_empty()));
+    if is_auth && !has_return {
+        return Err(syn::Error::new_spanned(
+            &func.sig.ident,
+            "an `on_auth_required` handler answers the challenge: return a `web_request::Auth` (`Auth::credentials(user, password)`, `Auth::Cancel` or `Auth::Prompt`)",
+        ));
+    }
     let raw_count = if replies { 3 } else { arg_types.len() };
     let raw_args: Vec<_> = (0..raw_count)
         .map(|i| format_ident!("__oxichrome_arg{}", i))
@@ -160,7 +175,15 @@ pub fn expand(attr: TokenStream, item: TokenStream, order: crate::codegen::Order
     } else {
         quote! {}
     };
-    let call = if replies {
+    let call = if is_auth {
+        let output = match &func.sig.output {
+            syn::ReturnType::Type(_, ty) => ty.as_ref().clone(),
+            syn::ReturnType::Default => unreachable!(),
+        };
+        quote_spanned! {output.span()=>
+            let __oxichrome_value: oxichrome::core::web_request::Auth = #fn_name(#(#call_args),*).await;
+        }
+    } else if replies {
         quote! {
             let __oxichrome_value = #fn_name(#(#call_args),*).await;
             oxichrome::core::runtime::__reply(&__oxichrome_reply, &__oxichrome_value)?;
@@ -169,13 +192,25 @@ pub fn expand(attr: TokenStream, item: TokenStream, order: crate::codegen::Order
         quote! { #fn_name(#(#call_args),*).await; }
     };
 
-    let entry = metadata::emit(serde_json::json!({
+    let mut entry = serde_json::json!({
         "kind": "event",
         "fn_name": fn_name.to_string(),
         "export": export_fn_name.to_string(),
         "namespace": namespace.to_string(),
         "event_name": event_name.to_string(),
-    }));
+    });
+    if namespace == "web_request" {
+        let filter = args.filter.as_ref();
+        let urls: Vec<String> = filter.map(|f| f.urls.iter().map(|url| url.value()).collect()).filter(|urls: &Vec<String>| !urls.is_empty()).unwrap_or_else(|| vec!["<all_urls>".to_string()]);
+        let types: Vec<String> = filter.map(|f| f.types.clone()).unwrap_or_default();
+        entry["filter"] = serde_json::json!({ "urls": urls, "types": types });
+    }
+    let entry = metadata::emit(entry);
+    let tail = if is_auth {
+        quote! { oxichrome::core::web_request::__auth_answer(&__oxichrome_value) }
+    } else {
+        quote! { Ok(#js_type::UNDEFINED) }
+    };
 
     Ok(quote! {
         #func
@@ -203,7 +238,7 @@ pub fn expand(attr: TokenStream, item: TokenStream, order: crate::codegen::Order
                 #keep_reply
                 #(#conversions)*
                 #call
-                Ok(#js_type::UNDEFINED)
+                #tail
             })
         }
     })

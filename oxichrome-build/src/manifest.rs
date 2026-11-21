@@ -196,6 +196,12 @@ pub fn generate_manifest(metadata: &ExtensionMetadata, browser: Browser) -> anyh
             if !metadata.offscreen.is_empty() && browser == Browser::Chromium && !permissions.iter().any(|p| p == "offscreen") {
                 permissions.push("offscreen".to_string());
             }
+            if metadata.event_handlers.iter().any(|handler| handler.namespace == "web_request" && handler.event_name == "on_auth_required") {
+                let needed = if browser == Browser::Chromium { "webRequestAuthProvider" } else { "webRequestBlocking" };
+                if !permissions.iter().any(|p| p == needed) {
+                    permissions.push(needed.to_string());
+                }
+            }
             permissions
         },
         optional_permissions: for_browser(&metadata.optional_permissions, metadata, browser),
@@ -702,6 +708,7 @@ mod tests {
             export: "__oxichrome_on_clicked".to_string(),
             namespace: "action".to_string(),
             event_name: "on_clicked".to_string(),
+            filter: None,
         }];
         let json = generate_manifest(&metadata, Browser::Chromium).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();

@@ -91,6 +91,15 @@ pub mod events {
     pub struct TabsOnUpdated;
     pub struct TabsOnRemoved;
     pub struct TabsOnActivated;
+    pub struct WebRequestOnBeforeRequest;
+    pub struct WebRequestOnBeforeSendHeaders;
+    pub struct WebRequestOnSendHeaders;
+    pub struct WebRequestOnHeadersReceived;
+    pub struct WebRequestOnResponseStarted;
+    pub struct WebRequestOnBeforeRedirect;
+    pub struct WebRequestOnCompleted;
+    pub struct WebRequestOnErrorOccurred;
+    pub struct WebRequestOnAuthRequired;
     pub struct TabsOnCreated;
     pub struct TabsOnMoved;
     pub struct TabsOnAttached;
@@ -157,6 +166,15 @@ arity! {
     TabsOnUpdated = 3,
     TabsOnRemoved = 2,
     TabsOnActivated = 1,
+    WebRequestOnBeforeRequest = 2,
+    WebRequestOnBeforeSendHeaders = 2,
+    WebRequestOnSendHeaders = 2,
+    WebRequestOnHeadersReceived = 2,
+    WebRequestOnResponseStarted = 2,
+    WebRequestOnBeforeRedirect = 2,
+    WebRequestOnCompleted = 2,
+    WebRequestOnErrorOccurred = 2,
+    WebRequestOnAuthRequired = 2,
     TabsOnCreated = 1,
     TabsOnMoved = 2,
     TabsOnAttached = 2,

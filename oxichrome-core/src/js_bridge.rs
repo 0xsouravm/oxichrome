@@ -1726,3 +1726,38 @@ extern "C" {
     #[wasm_bindgen(catch)]
     pub fn tabs_capture(window: &JsValue, options: &JsValue) -> Result<js_sys::Promise, JsValue>;
 }
+
+#[wasm_bindgen]
+extern "C" {
+    #[wasm_bindgen(js_namespace = ["chrome", "webRequest", "onBeforeRequest"], js_name = addListener)]
+    pub fn chrome_web_request_on_before_request_add_listener(callback: &Closure<dyn FnMut(JsValue, JsValue)>);
+    #[wasm_bindgen(js_namespace = ["chrome", "webRequest", "onBeforeSendHeaders"], js_name = addListener)]
+    pub fn chrome_web_request_on_before_send_headers_add_listener(callback: &Closure<dyn FnMut(JsValue, JsValue)>);
+    #[wasm_bindgen(js_namespace = ["chrome", "webRequest", "onSendHeaders"], js_name = addListener)]
+    pub fn chrome_web_request_on_send_headers_add_listener(callback: &Closure<dyn FnMut(JsValue, JsValue)>);
+    #[wasm_bindgen(js_namespace = ["chrome", "webRequest", "onHeadersReceived"], js_name = addListener)]
+    pub fn chrome_web_request_on_headers_received_add_listener(callback: &Closure<dyn FnMut(JsValue, JsValue)>);
+    #[wasm_bindgen(js_namespace = ["chrome", "webRequest", "onResponseStarted"], js_name = addListener)]
+    pub fn chrome_web_request_on_response_started_add_listener(callback: &Closure<dyn FnMut(JsValue, JsValue)>);
+    #[wasm_bindgen(js_namespace = ["chrome", "webRequest", "onBeforeRedirect"], js_name = addListener)]
+    pub fn chrome_web_request_on_before_redirect_add_listener(callback: &Closure<dyn FnMut(JsValue, JsValue)>);
+    #[wasm_bindgen(js_namespace = ["chrome", "webRequest", "onCompleted"], js_name = addListener)]
+    pub fn chrome_web_request_on_completed_add_listener(callback: &Closure<dyn FnMut(JsValue, JsValue)>);
+    #[wasm_bindgen(js_namespace = ["chrome", "webRequest", "onErrorOccurred"], js_name = addListener)]
+    pub fn chrome_web_request_on_error_occurred_add_listener(callback: &Closure<dyn FnMut(JsValue, JsValue)>);
+    #[wasm_bindgen(js_namespace = ["chrome", "webRequest", "onAuthRequired"], js_name = addListener)]
+    pub fn chrome_web_request_on_auth_required_add_listener(callback: &Closure<dyn FnMut(JsValue, JsValue)>);
+}
+
+#[wasm_bindgen(inline_js = r#"
+export function web_request_handler_behavior_changed() {
+    if (typeof globalThis.chrome?.webRequest?.handlerBehaviorChanged !== 'function') {
+        throw new Error('oxichrome:no-permission');
+    }
+    return Promise.resolve(chrome.webRequest.handlerBehaviorChanged());
+}
+"#)]
+extern "C" {
+    #[wasm_bindgen(catch)]
+    pub fn web_request_handler_behavior_changed() -> Result<js_sys::Promise, JsValue>;
+}

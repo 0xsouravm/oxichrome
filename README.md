@@ -46,6 +46,7 @@ cargo oxichrome build --target firefox # Firefox
 - Typed bindings to `chrome.storage`, `chrome.tabs`, `chrome.runtime`
 - Typed messages and ports between the background, pages and content scripts, routed by message type
 - Tabs you can move, duplicate, discard, highlight and capture, and tab groups, the same in Chrome and Firefox
+- Typed web request events with URL and type filters, and answers to login challenges
 - Leptos for reactive popup, options page and side panel UI
 - `cargo oxichrome build` handles everything: compilation, wasm-bindgen, manifest generation, JS/HTML shim generation, static asset copying, optional wasm-opt
 - **`--target firefox`** generates a Firefox-compatible Manifest V3 extension
@@ -239,6 +240,7 @@ Listeners are registered synchronously when the background script starts, and ev
 | `tabs::on_attached` / `on_detached` | `tab_id: i32, tabs::Attached` / `tabs::Detached` |
 | `tabs::on_highlighted` | `tabs::Highlighted` |
 | `tab_groups::on_created` / `on_updated` / `on_moved` / `on_removed` | `tab_groups::Group` |
+| `web_request::*` | `web_request::Request` and one more (see [Web requests](#web-requests)) |
 | `alarms::on_alarm` | `alarms::Alarm` |
 | `notifications::on_clicked` | `id: String` |
 | `notifications::on_closed` | `id: String, by_user: Option<bool>` |
@@ -784,6 +786,47 @@ port.disconnect();
 ```
 
 `runtime::connect(name)` opens a port to the background and extension pages, and `tabs::connect(tab_id, name, frame_id)` to a tab's content scripts. Pages and content scripts accept ports with `runtime::on_connect(|port| async move { ... })`. Messages sent before the other side starts reading are kept in order. `recv` returns `None` once either side disconnects and every message has been read, and `closed().await` waits for that: `Ok(())` for a normal close, `Err` when nothing was listening. Each `on_connect` handler gets every message. The background can stop while a port is open (Chrome stops an idle service worker, Firefox an idle event page), which closes the port; a new `request` or `connect` starts it again.
+
+## Web requests
+
+`web_request` events report the requests the browser makes to sites the extension has host permission for, typed the same in Chrome and Firefox. They need `WebRequest` in `permissions`. Each handler can filter by URL pattern and resource type; without `urls` it gets every URL the extension can see.
+
+```rust
+use oxichrome::web_request::{self, Auth, AuthChallenge, NetError, Request, Response};
+
+#[oxichrome::on(web_request::on_completed, urls = ["https://api.example.com/*"], types = [XmlHttpRequest])]
+async fn finished(request: Request, response: Response) {
+    // request.id, url, method, kind, tab_id, frame_id, initiator, time
+    // response.status, status_line, headers.get("content-type"), ip, from_cache
+}
+
+#[oxichrome::on(web_request::on_error_occurred)]
+async fn failed(request: Request, error: NetError) {
+    // error.kind: Aborted, ConnectionRefused, NameNotResolved, TimedOut, Blocked, ...
+}
+
+#[oxichrome::on(web_request::on_auth_required, urls = ["https://intranet.example.com/*"])]
+async fn login(request: Request, challenge: AuthChallenge) -> Auth {
+    if challenge.attempt > 1 { Auth::Cancel } else { Auth::credentials("me", "secret") }
+}
+```
+
+| Event | Second argument |
+|---|---|
+| `on_before_request` | `Option<Body>`: `Body::Form` (each field and its values) or `Body::Raw` (bytes) |
+| `on_before_send_headers`, `on_send_headers` | `Headers` sent |
+| `on_headers_received`, `on_response_started`, `on_completed` | `Response` |
+| `on_before_redirect` | `Redirect` (`to`, `status`, `headers`) |
+| `on_error_occurred` | `NetError` (`kind`, and the browser's own `message`) |
+| `on_auth_required` | `AuthChallenge` (`scheme`, `realm`, `host`, `port`, `is_proxy`, `attempt`) |
+
+The first argument is always `Request`; a handler can also take only the `Request`, or nothing. Events come in the order of the table, with `on_before_redirect` followed by a new `on_before_request` for the next URL under the same `request.id`. Every request that starts ends in exactly one `on_completed` or `on_error_occurred`. A stopped background starts again for these events.
+
+The types are `MainFrame`, `SubFrame`, `Stylesheet`, `Script`, `Image`, `Font`, `Object`, `XmlHttpRequest`, `Ping`, `CspReport`, `Media`, `WebSocket` and `Other`; Firefox's finer kinds (`imageset`, `beacon`, `object_subrequest`) count as `Image`, `Ping` and `Object`, both in filters and in `request.kind`. `Headers` include `Set-Cookie` in both browsers (Chrome hides it and a few other headers unless asked, and oxichrome asks); Firefox also lists `Host` among the request headers. `request.initiator` is the origin of the page or extension that made the request (Chrome gives an origin, Firefox a full URL, which oxichrome shortens). `tab_id` is `None` for requests made outside a tab, like the background's.
+
+`on_auth_required` is the one event a handler answers: it returns `Auth::credentials(user, password)`, `Auth::Cancel` or `Auth::Prompt` (the browser asks the user). oxichrome adds the permission each browser needs for it (`webRequestAuthProvider` in Chrome, `webRequestBlocking` in Firefox), and an extension can have only one such handler. Credentials that are refused bring the handler back with `attempt` one higher; after three refusals oxichrome cancels the request (Chrome would retry about 30 times, Firefox forever). A cancel shows up differently: Chrome finishes the request with the server's 401, Firefox fails it, and `on_error_occurred` reports `Aborted` (or `TooManyAuthAttempts` after three refusals). Browsers remember accepted credentials, so later requests to the same place don't ask again.
+
+These events only watch. Blocking or changing requests from a listener works only in Firefox (Chrome ignores what a listener returns), so use [`declarative_net_request`](#chrome-apis) for that in both browsers. Error names differ by browser underneath `NetError::kind`: a request blocked by a rule is `Blocked` in Chrome but `Aborted` in Firefox, which reports both the same way. `web_request::handler_behavior_changed()` clears the browser's cache of what handlers do (Chrome allows 20 calls in 10 minutes).
 
 ## Chrome APIs
 

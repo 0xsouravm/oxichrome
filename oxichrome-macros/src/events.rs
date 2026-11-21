@@ -3,6 +3,7 @@ pub const EVENTS: &[(&str, &[&str])] = &[
     ("storage", &["on_changed"]),
     ("tabs", &["on_updated", "on_removed", "on_activated", "on_created", "on_moved", "on_attached", "on_detached", "on_highlighted"]),
     ("tab_groups", &["on_created", "on_updated", "on_removed", "on_moved"]),
+    ("web_request", &["on_before_request", "on_before_send_headers", "on_send_headers", "on_headers_received", "on_response_started", "on_before_redirect", "on_completed", "on_error_occurred", "on_auth_required"]),
     ("action", &["on_clicked"]),
     ("alarms", &["on_alarm"]),
     ("notifications", &["on_clicked", "on_closed", "on_button_clicked"]),
