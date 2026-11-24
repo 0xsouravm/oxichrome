@@ -2194,6 +2194,65 @@ extern "C" {
     pub fn declarative_content_get() -> Result<js_sys::Promise, JsValue>;
 }
 
+#[wasm_bindgen(inline_js = r#"
+function api(name) {
+    const found = globalThis.chrome?.[name];
+    if (!found) { throw new Error('oxichrome:no-permission'); }
+    return found;
+}
+export function tab_capture_stream_id(targetTabId, consumerTabId) {
+    const options = {};
+    if (targetTabId !== undefined) { options.targetTabId = targetTabId; }
+    if (consumerTabId !== undefined) { options.consumerTabId = consumerTabId; }
+    return api('tabCapture').getMediaStreamId(options);
+}
+export function tab_capture_captured() { return api('tabCapture').getCapturedTabs(); }
+// Chrome doesn't answer a picker it was told to cancel, so oxichrome answers it.
+const pickers = new Map();
+// Resolves to the request id (for cancelling) and a promise of the user's answer.
+export async function desktop_capture_choose(sources, tabId) {
+    const desktop = api('desktopCapture');
+    const tab = tabId === undefined ? undefined : await chrome.tabs.get(tabId);
+    let id;
+    let settle;
+    const done = new Promise((resolve, reject) => {
+        settle = resolve;
+        const answer = (streamId, options) => {
+            pickers.delete(id);
+            const error = chrome.runtime.lastError;
+            if (error) { reject(new Error(error.message)); } else { resolve({ streamId, canRequestAudioTrack: !!options?.canRequestAudioTrack }); }
+        };
+        id = tab === undefined ? desktop.chooseDesktopMedia(sources, answer) : desktop.chooseDesktopMedia(sources, tab, answer);
+    });
+    pickers.set(id, settle);
+    return { id, done };
+}
+export function desktop_capture_cancel(id) {
+    api('desktopCapture').cancelChooseDesktopMedia(id);
+    pickers.get(id)?.({ streamId: '', canRequestAudioTrack: false });
+    pickers.delete(id);
+}
+export function capture_open(source, id, audio, video) {
+    if (!globalThis.navigator?.mediaDevices) {
+        return Promise.reject(new Error('a media stream needs a page; open it in an extension page or an offscreen document, not the background service worker'));
+    }
+    const track = { mandatory: { chromeMediaSource: source, chromeMediaSourceId: id } };
+    return navigator.mediaDevices.getUserMedia({ audio: audio ? track : false, video: video ? track : false });
+}
+"#)]
+extern "C" {
+    #[wasm_bindgen(catch)]
+    pub fn tab_capture_stream_id(target: Option<i32>, consumer: Option<i32>) -> Result<js_sys::Promise, JsValue>;
+    #[wasm_bindgen(catch)]
+    pub fn tab_capture_captured() -> Result<js_sys::Promise, JsValue>;
+    #[wasm_bindgen(catch)]
+    pub fn desktop_capture_choose(sources: &js_sys::Array, tab: Option<i32>) -> Result<js_sys::Promise, JsValue>;
+    #[wasm_bindgen(catch)]
+    pub fn desktop_capture_cancel(id: i32) -> Result<(), JsValue>;
+    #[wasm_bindgen(catch)]
+    pub fn capture_open(source: &str, id: &str, audio: bool, video: bool) -> Result<js_sys::Promise, JsValue>;
+}
+
 #[wasm_bindgen(module = "/js/browser.js")]
 extern "C" {
     /// Whether this is Firefox. The answer comes from `js/browser.js`, which every
