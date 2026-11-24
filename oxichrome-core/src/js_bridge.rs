@@ -143,6 +143,9 @@ extern "C" {
     #[wasm_bindgen(catch, js_namespace = ["chrome", "action"], js_name = disable)]
     pub fn chrome_action_disable(tab_id: Option<i32>) -> Result<js_sys::Promise, JsValue>;
 
+    #[wasm_bindgen(catch, js_namespace = ["chrome", "action"], js_name = isEnabled)]
+    pub fn chrome_action_is_enabled(tab_id: Option<i32>) -> Result<js_sys::Promise, JsValue>;
+
     #[wasm_bindgen(js_namespace = ["chrome", "action", "onClicked"], js_name = addListener)]
     pub fn chrome_action_on_clicked_add_listener(callback: &Closure<dyn FnMut(JsValue)>);
 }

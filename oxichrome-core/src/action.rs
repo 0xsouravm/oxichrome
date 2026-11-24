@@ -124,6 +124,12 @@ pub async fn disable(tab_id: Option<i32>) -> Result<()> {
     await_unit(js_bridge::chrome_action_disable(tab_id)?).await
 }
 
+/// Whether the button is on, in `tab_id` or (with `None`) by default.
+pub async fn is_enabled(tab_id: Option<i32>) -> Result<bool> {
+    let value = wasm_bindgen_futures::JsFuture::from(js_bridge::chrome_action_is_enabled(tab_id)?).await?;
+    Ok(value.as_bool().unwrap_or(false))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
