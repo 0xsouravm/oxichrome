@@ -25,6 +25,7 @@ mod json;
 pub mod notifications;
 pub mod offscreen;
 pub mod omnibox;
+pub mod page_capture;
 pub mod permissions;
 pub mod privacy;
 pub mod proxy;

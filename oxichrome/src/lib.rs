@@ -25,6 +25,7 @@ pub use oxichrome_core::downloads;
 pub use oxichrome_core::notifications;
 pub use oxichrome_core::offscreen;
 pub use oxichrome_core::omnibox;
+pub use oxichrome_core::page_capture;
 pub use oxichrome_core::permissions;
 pub use oxichrome_core::permissions::Permission;
 pub use oxichrome_core::privacy;
