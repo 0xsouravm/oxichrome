@@ -5,6 +5,7 @@ pub use oxichrome_core as core;
 pub use oxichrome_core::content_script::RunAt;
 pub use oxichrome_core::error::{OxichromeError, Result};
 pub use oxichrome_core::action;
+pub use oxichrome_core::ai;
 pub use oxichrome_core::alarms;
 pub use oxichrome_core::bookmarks;
 pub use oxichrome_core::browsing_data;

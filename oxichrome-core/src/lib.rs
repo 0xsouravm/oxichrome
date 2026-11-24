@@ -1,4 +1,5 @@
 pub mod action;
+pub mod ai;
 pub mod alarms;
 pub mod bookmarks;
 pub mod browsing_data;

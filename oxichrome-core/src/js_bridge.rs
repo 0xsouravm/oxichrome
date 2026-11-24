@@ -2103,6 +2103,58 @@ extern "C" {
     pub fn tts_call(op: &str) -> Result<JsValue, JsValue>;
 }
 
+#[wasm_bindgen(inline_js = r#"
+import { isFirefox } from './js/browser.js';
+function model(name) {
+    const api = globalThis[name];
+    if (api) { return api; }
+    if (isFirefox) { throw new Error(`Firefox doesn't have Chrome's built-in AI (\`${name}\`); check \`availability()\` first`); }
+    if (typeof window === 'undefined') { throw new Error(`\`${name}\` is only in extension pages, not the background service worker; use it from a page or an offscreen document`); }
+    throw new Error(`this Chrome doesn't have \`${name}\`; check \`availability()\` first`);
+}
+function explain(error) {
+    if (error?.name === 'NotAllowedError') {
+        return new Error(`${error.message} (Chrome downloads a model only after a click; call create from a click handler)`);
+    }
+    return error;
+}
+export async function ai_availability(name, options) {
+    if (!globalThis[name]) { return 'unavailable'; }
+    try { return await globalThis[name].availability(options); } catch (error) { throw explain(error); }
+}
+// The fields are getters on a class, which a JSON copy would drop, so they are copied here.
+export async function ai_params() {
+    const params = globalThis.LanguageModel?.params ? await globalThis.LanguageModel.params() : null;
+    if (!params) { return null; }
+    const { defaultTopK, maxTopK, defaultTemperature, maxTemperature } = params;
+    return { defaultTopK, maxTopK, defaultTemperature, maxTemperature };
+}
+export async function ai_create(name, options, onProgress) {
+    const api = model(name);
+    const monitor = (m) => m.addEventListener('downloadprogress', (event) => onProgress(event.loaded));
+    try { return await api.create({ ...options, monitor }); } catch (error) { throw explain(error); }
+}
+export async function ai_call(object, method, args) {
+    try { return await object[method](...args); } catch (error) { throw explain(error); }
+}
+export async function ai_stream(object, method, args, onChunk) {
+    let full = '';
+    try {
+        for await (const chunk of object[method](...args)) { full += chunk; onChunk(chunk); }
+    } catch (error) { throw explain(error); }
+    return full;
+}
+export function ai_destroy(object) { try { object?.destroy?.(); } catch {} }
+"#)]
+extern "C" {
+    pub fn ai_availability(name: &str, options: &JsValue) -> js_sys::Promise;
+    pub fn ai_params() -> js_sys::Promise;
+    pub fn ai_create(name: &str, options: &JsValue, on_progress: &js_sys::Function) -> js_sys::Promise;
+    pub fn ai_call(object: &JsValue, method: &str, args: &js_sys::Array) -> js_sys::Promise;
+    pub fn ai_stream(object: &JsValue, method: &str, args: &js_sys::Array, on_chunk: &js_sys::Function) -> js_sys::Promise;
+    pub fn ai_destroy(object: &JsValue);
+}
+
 #[wasm_bindgen(module = "/js/browser.js")]
 extern "C" {
     /// Whether this is Firefox. The answer comes from `js/browser.js`, which every
