@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 
 pub const LISTS: [(&str, &str); 2] = [("trackers", "Trackers"), ("annoyances", "Annoyances")];
 const STATE: &str = "state";
-const PAGES: &str = "pages_stopped";
+pub const PAGES: &str = "pages_stopped";
 const REQUESTS: &str = "requests_stopped";
 const STRIP_RULE: u32 = 1;
 const BLOCKED_FROM: u32 = 1000;

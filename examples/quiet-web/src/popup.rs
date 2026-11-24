@@ -1,8 +1,7 @@
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 use oxichrome::cookies::{self, Query};
-use oxichrome::{popup, tabs};
-use serde_json::json;
+use oxichrome::{popup, storage, tabs};
 
 use crate::rules::{self, Stopped};
 
@@ -17,8 +16,7 @@ fn Popup() -> impl IntoView {
     let note = RwSignal::new(String::new());
 
     spawn_local(async move {
-        let found: Vec<tabs::Tab> = tabs::query(&json!({ "active": true, "currentWindow": true })).await.unwrap_or_default();
-        if let Some(tab) = found.into_iter().next() {
+        if let Ok(Some(tab)) = tabs::active_tab().await {
             let url = tab.url.unwrap_or_default();
             site.set(rules::is_web(&url).then(|| rules::host(&url)));
             tab_id.set(tab.id);
@@ -29,6 +27,12 @@ fn Popup() -> impl IntoView {
         }
         pages.set(rules::pages_stopped().await);
         requests.set(rules::requests_stopped().await);
+    });
+
+    let _ = storage::on_changed(move |change| {
+        if change.key == rules::PAGES {
+            pages.set(change.new_value().ok().flatten().unwrap_or(0));
+        }
     });
 
     let block = move |_| {

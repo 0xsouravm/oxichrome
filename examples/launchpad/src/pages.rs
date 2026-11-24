@@ -3,13 +3,11 @@ use leptos::task::spawn_local;
 use oxichrome::management::{self, SelfInfo};
 use oxichrome::omnibox::Disposition;
 use oxichrome::{bookmarks, options_page, popup, tabs};
-use serde_json::json;
 
 use crate::{go, is_web, Place, FOLDER};
 
 async fn current_page() -> Option<Place> {
-    let found: Vec<tabs::Tab> = tabs::query(&json!({ "active": true, "currentWindow": true })).await.ok()?;
-    let tab = found.into_iter().next()?;
+    let tab = tabs::active_tab().await.ok()??;
     let url = tab.url.filter(|url| is_web(url))?;
     Some(Place { title: tab.title.unwrap_or_default(), url })
 }

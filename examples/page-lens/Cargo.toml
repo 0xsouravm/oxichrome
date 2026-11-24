@@ -13,5 +13,4 @@ oxichrome = { path = "../../oxichrome" }
 leptos = { version = "0.8", features = ["csr"] }
 wasm-bindgen = "0.2"
 serde = { version = "1", features = ["derive"] }
-serde_json = "1"
 web-sys = { version = "0.3", features = ["Document", "Element", "EventTarget", "HtmlElement", "HtmlDocument", "HtmlTextAreaElement", "HtmlCollection", "NodeList", "Node", "Window", "ScrollIntoViewOptions", "ScrollBehavior"] }
