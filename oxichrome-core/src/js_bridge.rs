@@ -411,12 +411,10 @@ extern "C" {
 }
 
 #[wasm_bindgen(inline_js = r#"
+import { isFirefox } from './js/browser.js';
+
 function api() {
     return globalThis.browser?.windows ?? globalThis.chrome.windows;
-}
-
-function isFirefox() {
-    return typeof globalThis.browser?.runtime?.getBrowserInfo === 'function';
 }
 
 export function windows_get(id, populate) {
@@ -436,7 +434,7 @@ export function windows_all(populate) {
 }
 
 export function windows_create(data) {
-    if (!isFirefox()) {
+    if (!isFirefox) {
         delete data.titlePreface;
     } else if (data.focused === false) {
         delete data.focused;
@@ -445,7 +443,7 @@ export function windows_create(data) {
 }
 
 export function windows_update(id, info) {
-    if (!isFirefox()) {
+    if (!isFirefox) {
         delete info.titlePreface;
     }
     return api().update(id, info);
@@ -740,16 +738,13 @@ extern "C" {
 }
 
 #[wasm_bindgen(inline_js = r#"
+import { isFirefox } from './js/browser.js';
 function api() {
     const downloads = globalThis.chrome?.downloads;
     if (!downloads) {
         throw new Error('oxichrome:no-permission');
     }
     return downloads;
-}
-
-function firefox() {
-    return typeof globalThis.browser?.runtime?.getBrowserInfo === 'function';
 }
 
 function base64(bytes) {
@@ -818,7 +813,7 @@ function isBackground() {
     }
 }
 
-if (firefox() && isBackground()) {
+if (isFirefox && isBackground()) {
     browser.runtime.onMessage.addListener((message) => {
         const save = message && typeof message === 'object' ? message.__oxichrome_download_save : undefined;
         if (!save || typeof save !== 'object') {
@@ -834,7 +829,7 @@ export function downloads_call(method, args) {
 
 export function downloads_save(filename, bytes, mime, conflictAction, saveAs) {
     const save = { filename, bytes, mime, conflictAction: conflictAction ?? undefined, saveAs };
-    if (!firefox()) {
+    if (!isFirefox) {
         return api().download({ url: 'data:' + mime + ';base64,' + base64(bytes), filename, conflictAction: save.conflictAction, saveAs });
     }
     api();
@@ -943,6 +938,8 @@ extern "C" {
 }
 
 #[wasm_bindgen(inline_js = r#"
+import { isFirefox } from './js/browser.js';
+
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 function extensionPage() {
@@ -950,7 +947,7 @@ function extensionPage() {
     if (protocol !== 'chrome-extension:' && protocol !== 'moz-extension:') {
         throw new Error('oxichrome:content-script');
     }
-    return protocol === 'moz-extension:';
+    return isFirefox;
 }
 
 let config = null;
@@ -1113,6 +1110,7 @@ extern "C" {
 }
 
 #[wasm_bindgen(inline_js = r#"
+import { isFirefox } from './js/browser.js';
 const FIREFOX_ROOT = 'root________';
 const FIREFOX_TAGS = 'tags________';
 let queue = Promise.resolve();
@@ -1125,12 +1123,8 @@ function api() {
     return bookmarks;
 }
 
-function firefox() {
-    return typeof globalThis.browser?.runtime?.getBrowserInfo === 'function';
-}
-
 function rootId() {
-    return firefox() ? FIREFOX_ROOT : '0';
+    return isFirefox ? FIREFOX_ROOT : '0';
 }
 
 function fail(code, detail) {
@@ -1142,7 +1136,7 @@ function isFolder(node) {
 }
 
 async function tagFolders() {
-    if (!firefox()) {
+    if (!isFirefox) {
         return new Set();
     }
     try {
@@ -1162,7 +1156,7 @@ async function raw(id) {
     } catch (error) {
         fail('not-found', id);
     }
-    if (!node || (firefox() && (node.parentId === FIREFOX_TAGS || (await tagFolders()).has(node.parentId)))) {
+    if (!node || (isFirefox && (node.parentId === FIREFOX_TAGS || (await tagFolders()).has(node.parentId)))) {
         fail('not-found', id);
     }
     return node;
@@ -1277,7 +1271,7 @@ async function move(id, parentId, index) {
     if (same && target === node.index) {
         return node;
     }
-    const destination = { parentId: parent.id, index: !firefox() && same && target > node.index ? target + 1 : target };
+    const destination = { parentId: parent.id, index: !isFirefox && same && target > node.index ? target + 1 : target };
     return api().move(id, destination);
 }
 
@@ -1376,6 +1370,7 @@ extern "C" {
 }
 
 #[wasm_bindgen(inline_js = r#"
+import { isFirefox } from './js/browser.js';
 let queue = Promise.resolve();
 
 function api() {
@@ -1393,7 +1388,7 @@ function serial(task) {
 }
 
 function inclusive(end) {
-    return typeof globalThis.browser?.runtime?.getBrowserInfo === 'function' ? end : end + 0.0015;
+    return isFirefox ? end : end + 0.0015;
 }
 
 async function search(a) {
