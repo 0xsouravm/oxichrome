@@ -1893,3 +1893,45 @@ extern "C" {
     pub fn browsing_data_settings() -> Result<js_sys::Promise, JsValue>;
 }
 
+#[wasm_bindgen(inline_js = r#"
+function setting(group, key) {
+    const api = globalThis.chrome?.privacy;
+    if (!api) { throw new Error('oxichrome:no-permission'); }
+    return api[group][key];
+}
+export function privacy_call(op, group, key, value) {
+    const target = setting(group, key);
+    if (op === 'get') { return target.get({}); }
+    if (op === 'set') { return target.set({ value }).then(() => undefined); }
+    return target.clear({}).then(() => undefined);
+}
+export function privacy_on_change(group, key, callback) {
+    const target = globalThis.chrome?.privacy?.[group]?.[key];
+    if (!target?.onChange) { return undefined; }
+    target.onChange.addListener(callback);
+    return () => target.onChange.removeListener(callback);
+}
+"#)]
+extern "C" {
+    #[wasm_bindgen(catch)]
+    pub fn privacy_call(op: &str, group: &str, key: &str, value: &JsValue) -> Result<js_sys::Promise, JsValue>;
+    pub fn privacy_on_change(group: &str, key: &str, callback: &JsValue) -> JsValue;
+}
+
+#[wasm_bindgen(module = "/js/browser.js")]
+extern "C" {
+    /// Whether this is Firefox. The answer comes from `js/browser.js`, which every
+    /// snippet above imports, so the browser is told apart in one place.
+    pub fn is_firefox() -> bool;
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn firefox_is_told_apart_in_one_place() {
+        let bridge = include_str!("js_bridge.rs");
+        let check = ["getBrowser", "Info"].concat();
+        assert!(!bridge.contains(&check), "check for Firefox with `isFirefox` from js/browser.js, not again here");
+        assert_eq!(include_str!("../js/browser.js").matches(&check).count(), 2);
+    }
+}

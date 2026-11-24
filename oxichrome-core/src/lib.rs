@@ -21,6 +21,7 @@ pub mod notifications;
 pub mod offscreen;
 pub mod omnibox;
 pub mod permissions;
+pub mod privacy;
 pub mod runtime;
 pub mod scripting;
 pub mod search;
