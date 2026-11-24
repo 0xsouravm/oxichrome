@@ -97,6 +97,58 @@ pub mod session {
     }
 }
 
+/// Settings an administrator pushes to the extension through browser policy. Read-only.
+///
+/// Describe them with a type that derives `serde::Deserialize` and
+/// `oxichrome::ManagedSchema`, and name it in `#[oxichrome::extension(managed_storage = Policy)]`;
+/// the Chrome build then ships the schema Chrome checks the policy against (and shows in
+/// chrome://policy). Firefox reads the same settings from `policies.json` (under
+/// `3rdparty.Extensions.<gecko_id>`) or a managed storage manifest, with no schema.
+/// Make each field an `Option` or give the type `#[serde(default)]`: with no policy,
+/// [`read`](managed::read) sees no settings at all.
+///
+/// Chrome can load policy a moment after it starts, and an administrator can change it any
+/// time; either way the new settings arrive as an [`on_changed`] change with
+/// [`Area::Managed`], so read them again there.
+pub mod managed {
+    use super::*;
+
+    /// Marks a type `#[derive(oxichrome::ManagedSchema)]` made a schema for.
+    pub trait ManagedSchema: DeserializeOwned {}
+
+    async fn all() -> Result<JsValue> {
+        match JsFuture::from(js_bridge::storage_managed_get(&JsValue::NULL)?).await {
+            Ok(value) => Ok(value),
+            // Firefox, when no policy or manifest names the extension
+            Err(error) if crate::error::JsError::new(error.clone()).to_string().contains("Managed storage manifest not found") => {
+                Ok(js_sys::Object::new().into())
+            }
+            Err(error) => Err(error.into()),
+        }
+    }
+
+    /// Every managed setting, as `T`.
+    pub async fn read<T: ManagedSchema>() -> Result<T> {
+        let value = all().await?;
+        crate::json::from_js(&value).map_err(|error| {
+            OxichromeError::UnexpectedValue(format!(
+                "the managed settings don't fit `{}` ({error}); make its fields `Option`s or give it `#[serde(default)]`, since there may be no policy",
+                std::any::type_name::<T>()
+            ))
+        })
+    }
+
+    /// One managed setting, or `None` when the policy doesn't set it.
+    pub async fn get<T: DeserializeOwned>(key: &str) -> Result<Option<T>> {
+        let value = all().await?;
+        let value = js_sys::Reflect::get(&value, &JsValue::from_str(key)).map_err(OxichromeError::from)?;
+        if value.is_undefined() || value.is_null() {
+            return Ok(None);
+        }
+        Ok(Some(crate::json::from_js(&value)?))
+    }
+}
+
 pub use crate::runtime::Listener;
 
 /// The storage area a change happened in.

@@ -49,7 +49,12 @@ struct Manifest {
     oauth2: Option<crate::metadata::OAuth2>,
     #[serde(skip_serializing_if = "Option::is_none")]
     key: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    storage: Option<serde_json::Value>,
 }
+
+/// Where the managed storage schema goes in a Chrome build.
+pub const MANAGED_SCHEMA_FILE: &str = "managed_schema.json";
 
 #[derive(Serialize)]
 struct DeclarativeNetRequest {
@@ -304,6 +309,7 @@ pub fn generate_manifest(metadata: &ExtensionMetadata, browser: Browser) -> anyh
         }),
         oauth2: metadata.oauth2.clone().filter(|_| browser == Browser::Chromium),
         key: metadata.chrome_key.clone().filter(|_| browser == Browser::Chromium),
+        storage: (metadata.managed_schema.is_some() && browser == Browser::Chromium).then(|| serde_json::json!({ "managed_schema": MANAGED_SCHEMA_FILE })),
         commands: {
             let mut commands: BTreeMap<String, ManifestCommand> = metadata
                 .commands
@@ -476,6 +482,7 @@ mod tests {
             devtools_panels: Vec::new(),
             oauth2: None,
             chrome_key: None,
+            managed_schema: None,
             omnibox: None,
             popup_styles: Vec::new(),
             options_styles: Vec::new(),
@@ -533,6 +540,7 @@ mod tests {
             devtools_panels: Vec::new(),
             oauth2: None,
             chrome_key: None,
+            managed_schema: None,
             omnibox: None,
             popup_styles: Vec::new(),
             options_styles: Vec::new(),
@@ -592,6 +600,7 @@ mod tests {
             devtools_panels: Vec::new(),
             oauth2: None,
             chrome_key: None,
+            managed_schema: None,
             omnibox: None,
             popup_styles: Vec::new(),
             options_styles: Vec::new(),
@@ -678,6 +687,7 @@ mod tests {
             devtools_panels: Vec::new(),
             oauth2: None,
             chrome_key: None,
+            managed_schema: None,
             omnibox: None,
             popup_styles: Vec::new(),
             options_styles: Vec::new(),

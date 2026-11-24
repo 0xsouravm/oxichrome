@@ -11,6 +11,7 @@ pub mod content_script;
 pub mod offscreen;
 pub mod menu;
 pub mod command;
+pub mod managed;
 
 pub struct Order {
     pub file: String,

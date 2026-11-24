@@ -1,4 +1,4 @@
-pub use oxichrome_macros::{extension, background, on, popup, options_page, side_panel, devtools_panel, omnibox, content_script, offscreen, menu, submenu, command, t};
+pub use oxichrome_macros::{ManagedSchema, extension, background, on, popup, options_page, side_panel, devtools_panel, omnibox, content_script, offscreen, menu, submenu, command, t};
 
 pub use oxichrome_core as core;
 

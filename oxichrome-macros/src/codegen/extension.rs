@@ -298,7 +298,16 @@ pub fn expand(attr: TokenStream, item: TokenStream) -> Result<TokenStream, syn::
             "scopes": oauth2.scopes.iter().map(LitStr::value).collect::<Vec<_>>(),
         })),
         "chrome_key": args.chrome_key.as_ref().map(LitStr::value),
+        "managed_storage": args.managed_storage.as_ref().and_then(|path| path.segments.last()).map(|segment| segment.ident.to_string()),
     }));
+    let managed_check = args.managed_storage.as_ref().map(|path| {
+        quote! {
+            const _: () = {
+                fn derives_managed_schema<T: oxichrome::core::storage::managed::ManagedSchema>() {}
+                let _: fn() = derives_managed_schema::<#path>;
+            };
+        }
+    });
 
     Ok(quote! {
         #item_struct
@@ -309,6 +318,7 @@ pub fn expand(attr: TokenStream, item: TokenStream) -> Result<TokenStream, syn::
         #resource_checks
         #(#permission_checks)*
         #locale_checks
+        #managed_check
 
         impl #struct_name {
             #[allow(dead_code)]

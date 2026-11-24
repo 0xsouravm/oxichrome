@@ -185,3 +185,23 @@ pub fn command(attr: TokenStream, item: TokenStream) -> TokenStream {
         .unwrap_or_else(|e| e.into_compile_error())
         .into()
 }
+
+/// Describes the settings an administrator can push to the extension through policy, for
+/// `#[extension(managed_storage = Type)]` and `storage::managed::read::<Type>()`. Fields are
+/// `bool`, integers, floats, `String`, `Vec<T>`, `Option<T>`, `HashMap<String, T>` or other
+/// `ManagedSchema` types; doc comments become the descriptions Chrome shows in chrome://policy.
+///
+/// ```ignore
+/// #[derive(serde::Deserialize, oxichrome::ManagedSchema)]
+/// struct Policy {
+///     /// The server to sync with.
+///     server: Option<String>,
+///     blocked_sites: Option<Vec<String>>,
+/// }
+/// ```
+#[proc_macro_derive(ManagedSchema, attributes(serde))]
+pub fn managed_schema(input: TokenStream) -> TokenStream {
+    codegen::managed::expand(input.into())
+        .unwrap_or_else(|e| e.into_compile_error())
+        .into()
+}

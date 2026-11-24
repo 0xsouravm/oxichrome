@@ -170,6 +170,7 @@ pub struct ExtensionArgs {
     pub web_accessible: Vec<LitStr>,
     pub oauth2: Option<OAuth2Args>,
     pub chrome_key: Option<LitStr>,
+    pub managed_storage: Option<syn::Path>,
 }
 
 /// `oauth2 = { client_id = "...", scopes = [...] }`, for Chrome's `identity::google_token`.
@@ -570,6 +571,7 @@ impl Parse for ExtensionArgs {
         let mut web_accessible: Vec<LitStr> = Vec::new();
         let mut oauth2: Option<OAuth2Args> = None;
         let mut chrome_key: Option<LitStr> = None;
+        let mut managed_storage: Option<syn::Path> = None;
         let mut rule_sets_span: Option<proc_macro2::Span> = None;
 
         while !input.is_empty() {
@@ -591,6 +593,9 @@ impl Parse for ExtensionArgs {
                 }
                 "oauth2" => {
                     oauth2 = Some(parse_oauth2(input)?);
+                }
+                "managed_storage" => {
+                    managed_storage = Some(input.parse()?);
                 }
                 "chrome_key" => {
                     let key: LitStr = input.parse()?;
@@ -745,7 +750,14 @@ impl Parse for ExtensionArgs {
             }
         }
 
+        if let Some(path) = &managed_storage {
+            if !permissions.iter().any(|declared| declared.info.ident == "Storage") {
+                return Err(syn::Error::new_spanned(path, "managed storage is read with `storage::managed`; add `Storage` to `permissions`"));
+            }
+        }
+
         Ok(ExtensionArgs {
+            managed_storage,
             oauth2,
             chrome_key,
             name,

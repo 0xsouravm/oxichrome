@@ -102,6 +102,10 @@ pub fn run(release: bool, browser: Browser) -> Result<()> {
         .with_context(|| format!("failed to write {}", wasm_output.display()))?;
 
     let manifest_json = manifest::generate_manifest(&metadata, browser)?;
+    if let (Some(schema), Browser::Chromium) = (&metadata.managed_schema, browser) {
+        fs::write(dist_dir.join(manifest::MANAGED_SCHEMA_FILE), serde_json::to_string_pretty(schema)?)
+            .context("failed to write the managed storage schema")?;
+    }
     fs::write(dist_dir.join("manifest.json"), &manifest_json)
         .context("failed to write manifest.json")?;
     println!("[oxichrome] Generated manifest.json");

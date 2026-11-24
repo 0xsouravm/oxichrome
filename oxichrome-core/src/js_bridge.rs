@@ -57,6 +57,9 @@ extern "C" {
     #[wasm_bindgen(catch, js_namespace = ["chrome", "storage", "session"], js_name = remove)]
     pub fn chrome_storage_session_remove(keys: &JsValue) -> Result<js_sys::Promise, JsValue>;
 
+    #[wasm_bindgen(catch, js_namespace = ["chrome", "storage", "managed"], js_name = get)]
+    pub fn storage_managed_get(keys: &JsValue) -> Result<js_sys::Promise, JsValue>;
+
     #[wasm_bindgen(js_namespace = ["chrome", "storage", "onChanged"], js_name = addListener)]
     pub fn chrome_storage_on_changed_add_listener(callback: &Closure<dyn FnMut(JsValue, JsValue)>);
 }
