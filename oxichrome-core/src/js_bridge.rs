@@ -1990,6 +1990,119 @@ extern "C" {
     pub fn identity_profile() -> Result<js_sys::Promise, JsValue>;
 }
 
+#[wasm_bindgen(inline_js = r#"
+import { isFirefox } from './js/browser.js';
+function chromeTts() {
+    const tts = globalThis.chrome?.tts;
+    if (!tts) { throw new Error('oxichrome:no-permission'); }
+    return tts;
+}
+function synth() {
+    const speech = globalThis.speechSynthesis;
+    if (!speech) { throw new Error("Firefox speaks through a page's speechSynthesis, which this context doesn't have"); }
+    return speech;
+}
+// Firefox ends a cut off utterance with `end`, and drops queued ones without a word, so
+// oxichrome keeps what it is saying and answers for them when it cancels.
+const live = new Set();
+function cancelAll(speech) {
+    for (const entry of live) { entry.resolve(entry.started ? 'interrupted' : 'cancelled'); }
+    live.clear();
+    speech.cancel();
+}
+// Both browsers list their voices a moment after they are first asked.
+async function chromeVoices(tts) {
+    let voices = await tts.getVoices();
+    for (let tries = 0; !voices.length && tries < 20; tries++) {
+        await new Promise((done) => setTimeout(done, 50));
+        voices = await tts.getVoices();
+    }
+    return voices;
+}
+async function webVoices(speech) {
+    let voices = speech.getVoices();
+    for (let tries = 0; !voices.length && tries < 20; tries++) {
+        await new Promise((done) => setTimeout(done, 50));
+        voices = speech.getVoices();
+    }
+    return voices;
+}
+export function tts_speak(text, options, onWord) {
+    if (!isFirefox) {
+        const tts = chromeTts();
+        return (async () => {
+            if (options.voiceName) {
+                const voices = await chromeVoices(tts);
+                if (voices.length && !voices.some((voice) => voice.voiceName === options.voiceName)) {
+                    throw new Error(`there is no voice named "${options.voiceName}"`);
+                }
+            }
+            return await new Promise((resolve, reject) => {
+            const onEvent = (event) => {
+                if (event.type === 'word') { onWord(event.charIndex); }
+                else if (event.type === 'end' || event.type === 'interrupted' || event.type === 'cancelled') { resolve(event.type); }
+                else if (event.type === 'error') { reject(new Error(event.errorMessage || 'speech failed')); }
+            };
+            const call = tts.speak(text, { ...options, onEvent });
+            if (call?.catch) { call.catch(reject); }
+            });
+        })();
+    }
+    const speech = synth();
+    return (async () => {
+        const utterance = new SpeechSynthesisUtterance(text);
+        if (options.lang) { utterance.lang = options.lang; }
+        if (options.rate !== undefined) { utterance.rate = options.rate; }
+        if (options.pitch !== undefined) { utterance.pitch = options.pitch; }
+        if (options.volume !== undefined) { utterance.volume = options.volume; }
+        if (options.voiceName) {
+            const voice = (await webVoices(speech)).find((voice) => voice.name === options.voiceName);
+            if (!voice) { throw new Error(`there is no voice named "${options.voiceName}"`); }
+            utterance.voice = voice;
+        }
+        if (!options.enqueue) { cancelAll(speech); }
+        return await new Promise((resolve, reject) => {
+            const entry = { started: false, resolve };
+            const finish = (how) => { if (live.delete(entry)) { resolve(how); } };
+            live.add(entry);
+            utterance.onstart = () => { entry.started = true; };
+            utterance.onboundary = (event) => { if (event.name === 'word') { onWord(event.charIndex); } };
+            utterance.onend = () => finish('end');
+            utterance.onerror = (event) => {
+                if (event.error === 'interrupted') { finish(entry.started ? 'interrupted' : 'cancelled'); }
+                else if (event.error === 'canceled') { finish('cancelled'); }
+                else if (live.delete(entry)) { reject(new Error(`speech failed: ${event.error}`)); }
+            };
+            speech.speak(utterance);
+        });
+    })();
+}
+export function tts_call(op) {
+    if (!isFirefox) {
+        const tts = chromeTts();
+        if (op === 'getVoices') {
+            return chromeVoices(tts).then((voices) => voices.map((voice) => ({ voiceName: voice.voiceName, lang: voice.lang, remote: !!voice.remote })));
+        }
+        return tts[op]();
+    }
+    const speech = synth();
+    switch (op) {
+        case 'stop': return cancelAll(speech);
+        case 'pause': return speech.pause();
+        case 'resume': return speech.resume();
+        case 'isSpeaking': return Promise.resolve(speech.speaking || speech.pending);
+        case 'getVoices':
+            return webVoices(speech).then((voices) => voices.map((voice) => ({ voiceName: voice.name, lang: voice.lang, remote: !voice.localService })));
+    }
+}
+"#)]
+extern "C" {
+    #[wasm_bindgen(catch)]
+    pub fn tts_speak(text: &str, options: &JsValue, on_word: &js_sys::Function) -> Result<js_sys::Promise, JsValue>;
+    #[wasm_bindgen(catch)]
+    pub fn tts_call(op: &str) -> Result<JsValue, JsValue>;
+}
+
 #[wasm_bindgen(module = "/js/browser.js")]
 extern "C" {
     /// Whether this is Firefox. The answer comes from `js/browser.js`, which every

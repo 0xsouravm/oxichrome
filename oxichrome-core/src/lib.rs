@@ -33,6 +33,7 @@ pub mod storage;
 pub mod tab_groups;
 pub mod tabs;
 pub mod top_sites;
+pub mod tts;
 pub mod user_scripts;
 pub mod web_navigation;
 pub mod web_request;
