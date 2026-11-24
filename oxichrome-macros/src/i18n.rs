@@ -416,7 +416,7 @@ pub fn resolve(key: &Key) -> syn::Result<Resolved> {
     if found.is_empty() {
         let hint = match locales.suggest(&key.name) {
             Some(close) => format!("; did you mean `{close}`?"),
-            None => format!("; add it to `static/_locales/<locale>/messages.json`"),
+            None => "; add it to `static/_locales/<locale>/messages.json`".to_string(),
         };
         return Err(syn::Error::new(key.span, format!("there's no message `{}`{hint}", key.name)));
     }

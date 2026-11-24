@@ -1130,7 +1130,7 @@ mod tests {
     fn with(base: &str, field: &str, value: &str) -> String {
         let marker = format!("\"{field}\":");
         let start = base.find(&marker).unwrap() + marker.len();
-        let end = start + base[start..].find(|c| c == ',' || c == '}').unwrap();
+        let end = start + base[start..].find([',', '}']).unwrap();
         format!("{}{value}{}", &base[..start], &base[end..])
     }
 

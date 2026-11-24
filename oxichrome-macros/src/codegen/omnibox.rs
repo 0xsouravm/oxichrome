@@ -82,7 +82,7 @@ pub fn expand(attr: TokenStream, item: TokenStream) -> Result<TokenStream, syn::
     let func: ItemFn = syn::parse2(item)?;
     let shape = "write it as `async fn suggest(input: String) -> Vec<omnibox::Suggestion>`";
     if func.sig.asyncness.is_none() {
-        return Err(syn::Error::new_spanned(&func.sig.fn_token, format!("the omnibox function must be async; {shape}")));
+        return Err(syn::Error::new_spanned(func.sig.fn_token, format!("the omnibox function must be async; {shape}")));
     }
     let input_ty = match func.sig.inputs.iter().collect::<Vec<_>>().as_slice() {
         [FnArg::Typed(input)] => input.ty.clone(),

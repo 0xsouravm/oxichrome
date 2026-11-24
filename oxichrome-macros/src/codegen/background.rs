@@ -9,7 +9,7 @@ pub fn expand(item: TokenStream, order: crate::codegen::Order) -> Result<TokenSt
 
     if func.sig.asyncness.is_none() {
         return Err(syn::Error::new_spanned(
-            &func.sig.fn_token,
+            func.sig.fn_token,
             "#[oxichrome::background] function must be async",
         ));
     }
