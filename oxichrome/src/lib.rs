@@ -11,6 +11,7 @@ pub use oxichrome_core::bookmarks;
 pub use oxichrome_core::browsing_data;
 pub use oxichrome_core::commands;
 pub use oxichrome_core::context_menus;
+pub use oxichrome_core::content_settings;
 pub use oxichrome_core::cookies;
 pub use oxichrome_core::declarative_content;
 pub use oxichrome_core::desktop_capture;
