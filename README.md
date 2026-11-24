@@ -167,7 +167,8 @@ Defines extension metadata. Applied to a struct.
     rule_sets = { ads = "rules/ads.json", strict = "rules/strict.json" }, // optional, network rules
     disabled_rule_sets = [strict], // optional, rule sets that start off
     web_accessible = ["blocked.html", "pages/*"], // optional, files web pages may load
-    gecko_id = "my-extension@example.com" // optional, Firefox only
+    gecko_id = "my-extension@example.com", // optional, Firefox only
+    key = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" // optional, Chromium only
 )]
 struct MyExtension;
 ```
@@ -188,6 +189,8 @@ It accepts either form [allowed by Firefox](https://developer.mozilla.org/en-US/
 - GUID in braces: `{daf44bf7-a45e-4450-979c-91cf07434c3d}`
 
 An invalid ID is a compile error, for both Firefox and Chromium builds.
+
+`key` is a base64 public key that pins the Chromium extension ID, written to `key` in the Chromium manifest only. Chromium builds the ID from this key instead of from the unpacked folder path, so the ID stays the same on every machine. A native messaging host allowlists that ID, so set `key` when the extension talks to a native host. Leave it out and Chromium picks an ID that changes with the folder.
 
 `rule_sets` names the [network rule](#network-rules) files in `static/`, and `disabled_rule_sets` lists the ones that start off. `web_accessible` lists files in `static/` (or `pages/*`, `pages/*.html`) that web pages may load or be redirected to; each must exist, and the extension's own code (`wasm/`) can't be listed.
 

@@ -281,6 +281,7 @@ pub fn expand(attr: TokenStream, item: TokenStream) -> Result<TokenStream, syn::
         "default_locale": args.default_locale.as_ref().map(LitStr::value),
         "version": version.value(),
         "description": args.description.as_ref().map(Text::value),
+        "key": args.extension_key.as_ref().map(LitStr::value),
         "gecko_id": args.gecko_id.as_ref().map(LitStr::value),
         "permissions": names(&args.permissions),
         "optional_permissions": names(&args.optional_permissions),

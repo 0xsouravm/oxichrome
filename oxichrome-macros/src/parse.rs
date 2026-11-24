@@ -157,6 +157,8 @@ pub struct ExtensionArgs {
     pub name: Text,
     pub version: LitStr,
     pub description: Option<Text>,
+    /// RSA-2048 public key (base64 DER) for Chromium extension ID
+    pub extension_key: Option<LitStr>,
     pub default_locale: Option<LitStr>,
     pub gecko_id: Option<LitStr>,
     pub permissions: Vec<crate::permission::Declared>,
@@ -558,6 +560,7 @@ impl Parse for ExtensionArgs {
         let mut name: Option<Text> = None;
         let mut version: Option<LitStr> = None;
         let mut description: Option<Text> = None;
+        let mut extension_key: Option<LitStr> = None;
         let mut default_locale: Option<LitStr> = None;
         let mut gecko_id: Option<LitStr> = None;
         let mut permissions: Vec<crate::permission::Declared> = Vec::new();
@@ -609,6 +612,9 @@ impl Parse for ExtensionArgs {
                     let id: LitStr = input.parse()?;
                     validate_gecko_id(&id)?;
                     gecko_id = Some(id);
+                }
+                "key" => {
+                    extension_key = Some(input.parse()?);
                 }
                 "permissions" => {
                     permissions = crate::permission::parse_list(input, "permissions")?;
@@ -766,6 +772,7 @@ impl Parse for ExtensionArgs {
             default_locale,
             gecko_id,
             permissions,
+            extension_key,
             optional_permissions,
             host_permissions,
             optional_host_permissions,
@@ -1280,6 +1287,17 @@ mod tests {
         );
         let err = extension(quote::quote! { icons = { 16 = "a.png", 16 = "b.png" } }).unwrap_err();
         assert!(err.to_string().contains("listed twice"), "{err}");
+    }
+
+    #[test]
+    fn extension_key_is_accepted() {
+        let args = extension(quote::quote! { key = "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA" }).unwrap();
+        assert_eq!(
+            args.extension_key.unwrap().value(),
+            "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA"
+        );
+        let args = extension(quote::quote! {}).unwrap();
+        assert!(args.extension_key.is_none());
     }
 
     #[test]
