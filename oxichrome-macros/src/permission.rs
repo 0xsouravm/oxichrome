@@ -50,7 +50,7 @@ table! {
     DeclarativeNetRequestWithHostAccess "declarativeNetRequestWithHostAccess" Any RequiredOnly;
     DesktopCapture "desktopCapture" Any No;
     Devtools "devtools" No Any;
-    Dns "dns" Any RequiredOnly;
+    Dns "dns" No RequiredOnly;
     DocumentScan "documentScan" Any No;
     Downloads "downloads" Any Any;
     DownloadsOpen "downloads.open" Any Any;

@@ -2,14 +2,12 @@ use leptos::prelude::*;
 use leptos::task::spawn_local;
 use oxichrome::downloads::{self, Conflict, Save};
 use oxichrome::{popup, side_panel, tabs};
-use serde_json::json;
 
 use crate::page::{self, PageInfo};
 use crate::{copy, markdown_link, minutes};
 
 pub async fn active_tab() -> Option<tabs::Tab> {
-    let found: Vec<tabs::Tab> = tabs::query(&json!({ "active": true, "currentWindow": true })).await.ok()?;
-    found.into_iter().next()
+    tabs::active_tab().await.ok()?
 }
 
 pub fn outline_markdown(info: &PageInfo) -> String {

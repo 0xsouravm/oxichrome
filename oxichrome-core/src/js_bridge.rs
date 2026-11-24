@@ -57,6 +57,9 @@ extern "C" {
     #[wasm_bindgen(catch, js_namespace = ["chrome", "storage", "session"], js_name = remove)]
     pub fn chrome_storage_session_remove(keys: &JsValue) -> Result<js_sys::Promise, JsValue>;
 
+    #[wasm_bindgen(catch, js_namespace = ["chrome", "storage", "managed"], js_name = get)]
+    pub fn storage_managed_get(keys: &JsValue) -> Result<js_sys::Promise, JsValue>;
+
     #[wasm_bindgen(js_namespace = ["chrome", "storage", "onChanged"], js_name = addListener)]
     pub fn chrome_storage_on_changed_add_listener(callback: &Closure<dyn FnMut(JsValue, JsValue)>);
 }
@@ -139,6 +142,9 @@ extern "C" {
 
     #[wasm_bindgen(catch, js_namespace = ["chrome", "action"], js_name = disable)]
     pub fn chrome_action_disable(tab_id: Option<i32>) -> Result<js_sys::Promise, JsValue>;
+
+    #[wasm_bindgen(catch, js_namespace = ["chrome", "action"], js_name = isEnabled)]
+    pub fn chrome_action_is_enabled(tab_id: Option<i32>) -> Result<js_sys::Promise, JsValue>;
 
     #[wasm_bindgen(js_namespace = ["chrome", "action", "onClicked"], js_name = addListener)]
     pub fn chrome_action_on_clicked_add_listener(callback: &Closure<dyn FnMut(JsValue)>);
@@ -411,12 +417,10 @@ extern "C" {
 }
 
 #[wasm_bindgen(inline_js = r#"
+import { isFirefox } from './js/browser.js';
+
 function api() {
     return globalThis.browser?.windows ?? globalThis.chrome.windows;
-}
-
-function isFirefox() {
-    return typeof globalThis.browser?.runtime?.getBrowserInfo === 'function';
 }
 
 export function windows_get(id, populate) {
@@ -436,7 +440,7 @@ export function windows_all(populate) {
 }
 
 export function windows_create(data) {
-    if (!isFirefox()) {
+    if (!isFirefox) {
         delete data.titlePreface;
     } else if (data.focused === false) {
         delete data.focused;
@@ -445,7 +449,7 @@ export function windows_create(data) {
 }
 
 export function windows_update(id, info) {
-    if (!isFirefox()) {
+    if (!isFirefox) {
         delete info.titlePreface;
     }
     return api().update(id, info);
@@ -740,16 +744,13 @@ extern "C" {
 }
 
 #[wasm_bindgen(inline_js = r#"
+import { isFirefox } from './js/browser.js';
 function api() {
     const downloads = globalThis.chrome?.downloads;
     if (!downloads) {
         throw new Error('oxichrome:no-permission');
     }
     return downloads;
-}
-
-function firefox() {
-    return typeof globalThis.browser?.runtime?.getBrowserInfo === 'function';
 }
 
 function base64(bytes) {
@@ -818,7 +819,7 @@ function isBackground() {
     }
 }
 
-if (firefox() && isBackground()) {
+if (isFirefox && isBackground()) {
     browser.runtime.onMessage.addListener((message) => {
         const save = message && typeof message === 'object' ? message.__oxichrome_download_save : undefined;
         if (!save || typeof save !== 'object') {
@@ -834,7 +835,7 @@ export function downloads_call(method, args) {
 
 export function downloads_save(filename, bytes, mime, conflictAction, saveAs) {
     const save = { filename, bytes, mime, conflictAction: conflictAction ?? undefined, saveAs };
-    if (!firefox()) {
+    if (!isFirefox) {
         return api().download({ url: 'data:' + mime + ';base64,' + base64(bytes), filename, conflictAction: save.conflictAction, saveAs });
     }
     api();
@@ -943,6 +944,8 @@ extern "C" {
 }
 
 #[wasm_bindgen(inline_js = r#"
+import { isFirefox } from './js/browser.js';
+
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 function extensionPage() {
@@ -950,7 +953,7 @@ function extensionPage() {
     if (protocol !== 'chrome-extension:' && protocol !== 'moz-extension:') {
         throw new Error('oxichrome:content-script');
     }
-    return protocol === 'moz-extension:';
+    return isFirefox;
 }
 
 let config = null;
@@ -1113,6 +1116,7 @@ extern "C" {
 }
 
 #[wasm_bindgen(inline_js = r#"
+import { isFirefox } from './js/browser.js';
 const FIREFOX_ROOT = 'root________';
 const FIREFOX_TAGS = 'tags________';
 let queue = Promise.resolve();
@@ -1125,12 +1129,8 @@ function api() {
     return bookmarks;
 }
 
-function firefox() {
-    return typeof globalThis.browser?.runtime?.getBrowserInfo === 'function';
-}
-
 function rootId() {
-    return firefox() ? FIREFOX_ROOT : '0';
+    return isFirefox ? FIREFOX_ROOT : '0';
 }
 
 function fail(code, detail) {
@@ -1142,7 +1142,7 @@ function isFolder(node) {
 }
 
 async function tagFolders() {
-    if (!firefox()) {
+    if (!isFirefox) {
         return new Set();
     }
     try {
@@ -1162,7 +1162,7 @@ async function raw(id) {
     } catch (error) {
         fail('not-found', id);
     }
-    if (!node || (firefox() && (node.parentId === FIREFOX_TAGS || (await tagFolders()).has(node.parentId)))) {
+    if (!node || (isFirefox && (node.parentId === FIREFOX_TAGS || (await tagFolders()).has(node.parentId)))) {
         fail('not-found', id);
     }
     return node;
@@ -1277,7 +1277,7 @@ async function move(id, parentId, index) {
     if (same && target === node.index) {
         return node;
     }
-    const destination = { parentId: parent.id, index: !firefox() && same && target > node.index ? target + 1 : target };
+    const destination = { parentId: parent.id, index: !isFirefox && same && target > node.index ? target + 1 : target };
     return api().move(id, destination);
 }
 
@@ -1376,6 +1376,7 @@ extern "C" {
 }
 
 #[wasm_bindgen(inline_js = r#"
+import { isFirefox } from './js/browser.js';
 let queue = Promise.resolve();
 
 function api() {
@@ -1393,7 +1394,7 @@ function serial(task) {
 }
 
 function inclusive(end) {
-    return typeof globalThis.browser?.runtime?.getBrowserInfo === 'function' ? end : end + 0.0015;
+    return isFirefox ? end : end + 0.0015;
 }
 
 async function search(a) {
@@ -1598,11 +1599,11 @@ export function tabs_connect(tab, name, frame) {
 export function tabs_send_message_to(tab, message, frame) {
     return chrome.tabs.sendMessage(tab, message, frame === undefined ? {} : { frameId: frame });
 }
-export function runtime_on_connect_add(callback) { chrome.runtime.onConnect.addListener(callback); }
-export function runtime_add_listener(callback) { chrome.runtime.onMessage.addListener(callback); }
-export function runtime_remove_listener(callback) {
-    chrome.runtime.onMessage.removeListener(callback);
-    chrome.runtime.onConnect.removeListener(callback);
+export function event_add(api, event, callback) {
+    const target = globalThis.chrome?.[api]?.[event];
+    if (typeof target?.addListener !== 'function') { return undefined; }
+    target.addListener(callback);
+    return () => target.removeListener(callback);
 }
 export function runtime_id() { return chrome.runtime.id; }
 export function runtime_manifest() { return chrome.runtime.getManifest(); }
@@ -1628,9 +1629,9 @@ extern "C" {
     pub fn tabs_connect(tab: i32, name: &str, frame: Option<f64>) -> Result<JsValue, JsValue>;
     #[wasm_bindgen(catch)]
     pub fn tabs_send_message_to(tab: i32, message: &JsValue, frame: Option<f64>) -> Result<js_sys::Promise, JsValue>;
-    pub fn runtime_on_connect_add(callback: &JsValue);
-    pub fn runtime_add_listener(callback: &JsValue);
-    pub fn runtime_remove_listener(callback: &JsValue);
+    /// Adds `callback` to `chrome[api][event]` and returns a function that removes it,
+    /// or `undefined` when this context doesn't have that event.
+    pub fn event_add(api: &str, event: &str, callback: &JsValue) -> JsValue;
     pub fn runtime_id() -> String;
     pub fn runtime_manifest() -> JsValue;
     #[wasm_bindgen(catch)]
@@ -1870,4 +1871,416 @@ extern "C" {
 
     #[wasm_bindgen(js_name = on_sessions_changed)]
     pub fn chrome_sessions_on_changed_add_listener(callback: &Closure<dyn FnMut(JsValue)>);
+}
+
+#[wasm_bindgen(inline_js = r#"
+import { isFirefox } from './js/browser.js';
+export function browsing_data_clear(names, since, origins, hosts) {
+    const api = globalThis.chrome?.browsingData;
+    if (!api) { throw new Error('oxichrome:no-permission'); }
+    const options = { since };
+    if (origins.length) {
+        if (isFirefox) { options.hostnames = hosts; } else { options.origins = origins; }
+    }
+    const data = {};
+    for (const name of names) { data[name] = true; }
+    return api.remove(options, data).then(() => undefined);
+}
+export function browsing_data_settings() {
+    const api = globalThis.chrome?.browsingData;
+    if (!api) { throw new Error('oxichrome:no-permission'); }
+    return api.settings();
+}
+"#)]
+extern "C" {
+    #[wasm_bindgen(catch)]
+    pub fn browsing_data_clear(names: &js_sys::Array, since: f64, origins: &js_sys::Array, hosts: &js_sys::Array) -> Result<js_sys::Promise, JsValue>;
+    #[wasm_bindgen(catch)]
+    pub fn browsing_data_settings() -> Result<js_sys::Promise, JsValue>;
+}
+
+#[wasm_bindgen(inline_js = r#"
+function setting(group, key) {
+    const api = globalThis.chrome?.privacy;
+    if (!api) { throw new Error('oxichrome:no-permission'); }
+    return api[group][key];
+}
+export function privacy_call(op, group, key, value) {
+    const target = setting(group, key);
+    if (op === 'get') { return target.get({}); }
+    if (op === 'set') { return target.set({ value }).then(() => undefined); }
+    return target.clear({}).then(() => undefined);
+}
+export function privacy_on_change(group, key, callback) {
+    const target = globalThis.chrome?.privacy?.[group]?.[key];
+    if (!target?.onChange) { return undefined; }
+    target.onChange.addListener(callback);
+    return () => target.onChange.removeListener(callback);
+}
+"#)]
+extern "C" {
+    #[wasm_bindgen(catch)]
+    pub fn privacy_call(op: &str, group: &str, key: &str, value: &JsValue) -> Result<js_sys::Promise, JsValue>;
+    pub fn privacy_on_change(group: &str, key: &str, callback: &JsValue) -> JsValue;
+}
+
+#[wasm_bindgen(inline_js = r#"
+import { isFirefox } from './js/browser.js';
+function api() {
+    const proxy = globalThis.chrome?.proxy;
+    if (!proxy) { throw new Error('oxichrome:no-permission'); }
+    return proxy;
+}
+export function proxy_call(op, value) {
+    const settings = api().settings;
+    if (op === 'get') { return settings.get({}); }
+    if (op === 'set') { return settings.set({ value }).then(() => undefined); }
+    return settings.clear({}).then(() => undefined);
+}
+export function proxy_allowed() {
+    if (!globalThis.chrome?.proxy) { return Promise.resolve(false); }
+    return isFirefox ? globalThis.browser.extension.isAllowedIncognitoAccess() : Promise.resolve(true);
+}
+export function proxy_on_error(callback) {
+    const event = isFirefox ? globalThis.chrome?.proxy?.onError : globalThis.chrome?.proxy?.onProxyError;
+    if (!event) { return undefined; }
+    event.addListener(callback);
+    return () => event.removeListener(callback);
+}
+"#)]
+extern "C" {
+    #[wasm_bindgen(catch)]
+    pub fn proxy_call(op: &str, value: &JsValue) -> Result<js_sys::Promise, JsValue>;
+    pub fn proxy_allowed() -> js_sys::Promise;
+    pub fn proxy_on_error(callback: &JsValue) -> JsValue;
+}
+
+#[wasm_bindgen(inline_js = r#"
+function api() {
+    const identity = globalThis.chrome?.identity;
+    if (!identity) { throw new Error('oxichrome:no-permission'); }
+    return identity;
+}
+const base64url = (bytes) => btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+export function identity_redirect_url(path) { return api().getRedirectURL(path); }
+export function identity_launch(url, interactive) { return api().launchWebAuthFlow({ url, interactive }); }
+export function identity_random() {
+    return Array.from(crypto.getRandomValues(new Uint8Array(16)), (byte) => byte.toString(16).padStart(2, '0')).join('');
+}
+export async function identity_pkce() {
+    const verifier = base64url(crypto.getRandomValues(new Uint8Array(32)));
+    const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier));
+    return [verifier, base64url(new Uint8Array(digest))];
+}
+export function identity_google_token(interactive, scopes) {
+    return api().getAuthToken(scopes.length ? { interactive, scopes } : { interactive });
+}
+export function identity_remove_google_token(token) { return api().removeCachedAuthToken({ token }); }
+export function identity_profile() { return api().getProfileUserInfo({}); }
+"#)]
+extern "C" {
+    #[wasm_bindgen(catch)]
+    pub fn identity_redirect_url(path: &str) -> Result<String, JsValue>;
+    #[wasm_bindgen(catch)]
+    pub fn identity_launch(url: &str, interactive: bool) -> Result<js_sys::Promise, JsValue>;
+    pub fn identity_random() -> String;
+    pub fn identity_pkce() -> js_sys::Promise;
+    #[wasm_bindgen(catch)]
+    pub fn identity_google_token(interactive: bool, scopes: &js_sys::Array) -> Result<js_sys::Promise, JsValue>;
+    #[wasm_bindgen(catch)]
+    pub fn identity_remove_google_token(token: &str) -> Result<js_sys::Promise, JsValue>;
+    #[wasm_bindgen(catch)]
+    pub fn identity_profile() -> Result<js_sys::Promise, JsValue>;
+}
+
+#[wasm_bindgen(inline_js = r#"
+import { isFirefox } from './js/browser.js';
+function chromeTts() {
+    const tts = globalThis.chrome?.tts;
+    if (!tts) { throw new Error('oxichrome:no-permission'); }
+    return tts;
+}
+function synth() {
+    const speech = globalThis.speechSynthesis;
+    if (!speech) { throw new Error("Firefox speaks through a page's speechSynthesis, which this context doesn't have"); }
+    return speech;
+}
+// Firefox ends a cut off utterance with `end`, and drops queued ones without a word, so
+// oxichrome keeps what it is saying and answers for them when it cancels.
+const live = new Set();
+function cancelAll(speech) {
+    for (const entry of live) { entry.resolve(entry.started ? 'interrupted' : 'cancelled'); }
+    live.clear();
+    speech.cancel();
+}
+// Both browsers list their voices a moment after they are first asked.
+async function chromeVoices(tts) {
+    let voices = await tts.getVoices();
+    for (let tries = 0; !voices.length && tries < 20; tries++) {
+        await new Promise((done) => setTimeout(done, 50));
+        voices = await tts.getVoices();
+    }
+    return voices;
+}
+async function webVoices(speech) {
+    let voices = speech.getVoices();
+    for (let tries = 0; !voices.length && tries < 20; tries++) {
+        await new Promise((done) => setTimeout(done, 50));
+        voices = speech.getVoices();
+    }
+    return voices;
+}
+export function tts_speak(text, options, onWord) {
+    if (!isFirefox) {
+        const tts = chromeTts();
+        return (async () => {
+            if (options.voiceName) {
+                const voices = await chromeVoices(tts);
+                if (voices.length && !voices.some((voice) => voice.voiceName === options.voiceName)) {
+                    throw new Error(`there is no voice named "${options.voiceName}"`);
+                }
+            }
+            return await new Promise((resolve, reject) => {
+            const onEvent = (event) => {
+                if (event.type === 'word') { onWord(event.charIndex); }
+                else if (event.type === 'end' || event.type === 'interrupted' || event.type === 'cancelled') { resolve(event.type); }
+                else if (event.type === 'error') { reject(new Error(event.errorMessage || 'speech failed')); }
+            };
+            const call = tts.speak(text, { ...options, onEvent });
+            if (call?.catch) { call.catch(reject); }
+            });
+        })();
+    }
+    const speech = synth();
+    return (async () => {
+        const utterance = new SpeechSynthesisUtterance(text);
+        if (options.lang) { utterance.lang = options.lang; }
+        if (options.rate !== undefined) { utterance.rate = options.rate; }
+        if (options.pitch !== undefined) { utterance.pitch = options.pitch; }
+        if (options.volume !== undefined) { utterance.volume = options.volume; }
+        if (options.voiceName) {
+            const voice = (await webVoices(speech)).find((voice) => voice.name === options.voiceName);
+            if (!voice) { throw new Error(`there is no voice named "${options.voiceName}"`); }
+            utterance.voice = voice;
+        }
+        if (!options.enqueue) { cancelAll(speech); }
+        return await new Promise((resolve, reject) => {
+            const entry = { started: false, resolve };
+            const finish = (how) => { if (live.delete(entry)) { resolve(how); } };
+            live.add(entry);
+            utterance.onstart = () => { entry.started = true; };
+            utterance.onboundary = (event) => { if (event.name === 'word') { onWord(event.charIndex); } };
+            utterance.onend = () => finish('end');
+            utterance.onerror = (event) => {
+                if (event.error === 'interrupted') { finish(entry.started ? 'interrupted' : 'cancelled'); }
+                else if (event.error === 'canceled') { finish('cancelled'); }
+                else if (live.delete(entry)) { reject(new Error(`speech failed: ${event.error}`)); }
+            };
+            speech.speak(utterance);
+        });
+    })();
+}
+export function tts_call(op) {
+    if (!isFirefox) {
+        const tts = chromeTts();
+        if (op === 'getVoices') {
+            return chromeVoices(tts).then((voices) => voices.map((voice) => ({ voiceName: voice.voiceName, lang: voice.lang, remote: !!voice.remote })));
+        }
+        return tts[op]();
+    }
+    const speech = synth();
+    switch (op) {
+        case 'stop': return cancelAll(speech);
+        case 'pause': return speech.pause();
+        case 'resume': return speech.resume();
+        case 'isSpeaking': return Promise.resolve(speech.speaking || speech.pending);
+        case 'getVoices':
+            return webVoices(speech).then((voices) => voices.map((voice) => ({ voiceName: voice.name, lang: voice.lang, remote: !voice.localService })));
+    }
+}
+"#)]
+extern "C" {
+    #[wasm_bindgen(catch)]
+    pub fn tts_speak(text: &str, options: &JsValue, on_word: &js_sys::Function) -> Result<js_sys::Promise, JsValue>;
+    #[wasm_bindgen(catch)]
+    pub fn tts_call(op: &str) -> Result<JsValue, JsValue>;
+}
+
+#[wasm_bindgen(inline_js = r#"
+import { isFirefox } from './js/browser.js';
+function model(name) {
+    const api = globalThis[name];
+    if (api) { return api; }
+    if (isFirefox) { throw new Error(`Firefox doesn't have Chrome's built-in AI (\`${name}\`); check \`availability()\` first`); }
+    if (typeof window === 'undefined') { throw new Error(`\`${name}\` is only in extension pages, not the background service worker; use it from a page or an offscreen document`); }
+    throw new Error(`this Chrome doesn't have \`${name}\`; check \`availability()\` first`);
+}
+function explain(error) {
+    if (error?.name === 'NotAllowedError') {
+        return new Error(`${error.message} (Chrome downloads a model only after a click; call create from a click handler)`);
+    }
+    return error;
+}
+export async function ai_availability(name, options) {
+    if (!globalThis[name]) { return 'unavailable'; }
+    try { return await globalThis[name].availability(options); } catch (error) { throw explain(error); }
+}
+// The fields are getters on a class, which a JSON copy would drop, so they are copied here.
+export async function ai_params() {
+    const params = globalThis.LanguageModel?.params ? await globalThis.LanguageModel.params() : null;
+    if (!params) { return null; }
+    const { defaultTopK, maxTopK, defaultTemperature, maxTemperature } = params;
+    return { defaultTopK, maxTopK, defaultTemperature, maxTemperature };
+}
+export async function ai_create(name, options, onProgress) {
+    const api = model(name);
+    const monitor = (m) => m.addEventListener('downloadprogress', (event) => onProgress(event.loaded));
+    try { return await api.create({ ...options, monitor }); } catch (error) { throw explain(error); }
+}
+export async function ai_call(object, method, args) {
+    try { return await object[method](...args); } catch (error) { throw explain(error); }
+}
+export async function ai_stream(object, method, args, onChunk) {
+    let full = '';
+    try {
+        for await (const chunk of object[method](...args)) { full += chunk; onChunk(chunk); }
+    } catch (error) { throw explain(error); }
+    return full;
+}
+export function ai_destroy(object) { try { object?.destroy?.(); } catch {} }
+"#)]
+extern "C" {
+    pub fn ai_availability(name: &str, options: &JsValue) -> js_sys::Promise;
+    pub fn ai_params() -> js_sys::Promise;
+    pub fn ai_create(name: &str, options: &JsValue, on_progress: &js_sys::Function) -> js_sys::Promise;
+    pub fn ai_call(object: &JsValue, method: &str, args: &js_sys::Array) -> js_sys::Promise;
+    pub fn ai_stream(object: &JsValue, method: &str, args: &js_sys::Array, on_chunk: &js_sys::Function) -> js_sys::Promise;
+    pub fn ai_destroy(object: &JsValue);
+}
+
+#[wasm_bindgen(inline_js = r#"
+function events() {
+    const api = globalThis.chrome?.declarativeContent;
+    if (!api) { throw new Error('oxichrome:no-permission'); }
+    return api;
+}
+// `onPageChanged` takes callbacks; it doesn't return promises.
+function onPageChanged(method, ...args) {
+    return new Promise((resolve, reject) => events().onPageChanged[method](...args, (result) => {
+        const error = chrome.runtime.lastError;
+        if (error) { reject(new Error(error.message)); } else { resolve(result); }
+    }));
+}
+export function declarative_content_set(rules) {
+    const api = events();
+    return onPageChanged('removeRules').then(() => {
+        if (!rules.length) { return; }
+        return onPageChanged('addRules', rules.map((rule) => ({
+            conditions: rule.pages.map((page) => new api.PageStateMatcher(page)),
+            actions: [new api.ShowAction()],
+        })));
+    });
+}
+export function declarative_content_get() {
+    return onPageChanged('getRules').then((rules) => rules.map((rule) => ({
+        pages: rule.conditions.map(({ instanceType, ...page }) => page),
+    })));
+}
+"#)]
+extern "C" {
+    #[wasm_bindgen(catch)]
+    pub fn declarative_content_set(rules: &JsValue) -> Result<js_sys::Promise, JsValue>;
+    #[wasm_bindgen(catch)]
+    pub fn declarative_content_get() -> Result<js_sys::Promise, JsValue>;
+}
+
+#[wasm_bindgen(inline_js = r#"
+function api(name) {
+    const found = globalThis.chrome?.[name];
+    if (!found) { throw new Error('oxichrome:no-permission'); }
+    return found;
+}
+export function tab_capture_stream_id(targetTabId, consumerTabId) {
+    const options = {};
+    if (targetTabId !== undefined) { options.targetTabId = targetTabId; }
+    if (consumerTabId !== undefined) { options.consumerTabId = consumerTabId; }
+    return api('tabCapture').getMediaStreamId(options);
+}
+export function tab_capture_captured() { return api('tabCapture').getCapturedTabs(); }
+// Chrome doesn't answer a picker it was told to cancel, so oxichrome answers it.
+const pickers = new Map();
+// Resolves to the request id (for cancelling) and a promise of the user's answer.
+export async function desktop_capture_choose(sources, tabId) {
+    const desktop = api('desktopCapture');
+    const tab = tabId === undefined ? undefined : await chrome.tabs.get(tabId);
+    let id;
+    let settle;
+    const done = new Promise((resolve, reject) => {
+        settle = resolve;
+        const answer = (streamId, options) => {
+            pickers.delete(id);
+            const error = chrome.runtime.lastError;
+            if (error) { reject(new Error(error.message)); } else { resolve({ streamId, canRequestAudioTrack: !!options?.canRequestAudioTrack }); }
+        };
+        id = tab === undefined ? desktop.chooseDesktopMedia(sources, answer) : desktop.chooseDesktopMedia(sources, tab, answer);
+    });
+    pickers.set(id, settle);
+    return { id, done };
+}
+export function desktop_capture_cancel(id) {
+    api('desktopCapture').cancelChooseDesktopMedia(id);
+    pickers.get(id)?.({ streamId: '', canRequestAudioTrack: false });
+    pickers.delete(id);
+}
+export function capture_open(source, id, audio, video) {
+    if (!globalThis.navigator?.mediaDevices) {
+        return Promise.reject(new Error('a media stream needs a page; open it in an extension page or an offscreen document, not the background service worker'));
+    }
+    const track = { mandatory: { chromeMediaSource: source, chromeMediaSourceId: id } };
+    return navigator.mediaDevices.getUserMedia({ audio: audio ? track : false, video: video ? track : false });
+}
+"#)]
+extern "C" {
+    #[wasm_bindgen(catch)]
+    pub fn tab_capture_stream_id(target: Option<i32>, consumer: Option<i32>) -> Result<js_sys::Promise, JsValue>;
+    #[wasm_bindgen(catch)]
+    pub fn tab_capture_captured() -> Result<js_sys::Promise, JsValue>;
+    #[wasm_bindgen(catch)]
+    pub fn desktop_capture_choose(sources: &js_sys::Array, tab: Option<i32>) -> Result<js_sys::Promise, JsValue>;
+    #[wasm_bindgen(catch)]
+    pub fn desktop_capture_cancel(id: i32) -> Result<(), JsValue>;
+    #[wasm_bindgen(catch)]
+    pub fn capture_open(source: &str, id: &str, audio: bool, video: bool) -> Result<js_sys::Promise, JsValue>;
+}
+
+#[wasm_bindgen(inline_js = r#"
+import { isFirefox } from './js/browser.js';
+export function api_call(path, method, args) {
+    let target = isFirefox ? globalThis.browser : globalThis.chrome;
+    for (const part of path.split('.')) { target = target?.[part]; }
+    if (typeof target?.[method] !== 'function') { throw new Error('oxichrome:no-permission'); }
+    return Promise.resolve(target[method](...args));
+}
+"#)]
+extern "C" {
+    #[wasm_bindgen(catch)]
+    pub fn api_call(path: &str, method: &str, args: &js_sys::Array) -> Result<js_sys::Promise, JsValue>;
+}
+
+#[wasm_bindgen(module = "/js/browser.js")]
+extern "C" {
+    /// Whether this is Firefox. The answer comes from `js/browser.js`, which every
+    /// snippet above imports, so the browser is told apart in one place.
+    pub fn is_firefox() -> bool;
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn firefox_is_told_apart_in_one_place() {
+        let bridge = include_str!("js_bridge.rs");
+        let check = ["getBrowser", "Info"].concat();
+        assert!(!bridge.contains(&check), "check for Firefox with `isFirefox` from js/browser.js, not again here");
+        assert_eq!(include_str!("../js/browser.js").matches(&check).count(), 2);
+    }
 }

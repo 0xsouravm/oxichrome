@@ -55,7 +55,7 @@ pub fn expand(attr: TokenStream, item: TokenStream, order: crate::codegen::Order
 
     if func.sig.asyncness.is_none() {
         return Err(syn::Error::new_spanned(
-            &func.sig.fn_token,
+            func.sig.fn_token,
             "#[oxichrome::on(...)] function must be async",
         ));
     }

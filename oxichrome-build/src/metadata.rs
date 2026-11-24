@@ -37,6 +37,17 @@ pub struct ExtensionMetadata {
     pub rule_sets: Vec<RuleSet>,
     pub web_accessible: Vec<String>,
     pub offscreen: Vec<OffscreenFn>,
+    pub oauth2: Option<OAuth2>,
+    pub chrome_key: Option<String>,
+    /// The JSON schema for `storage.managed`, with every `$ref` filled in.
+    pub managed_schema: Option<serde_json::Value>,
+}
+
+/// Chrome's `oauth2` manifest key, for `identity::google_token`.
+#[derive(Debug, Clone, PartialEq, Deserialize, serde::Serialize)]
+pub struct OAuth2 {
+    pub client_id: String,
+    pub scopes: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -231,6 +242,17 @@ enum Entry {
         rule_sets: Vec<RuleSet>,
         #[serde(default)]
         web_accessible: Vec<String>,
+        #[serde(default)]
+        oauth2: Option<OAuth2>,
+        #[serde(default)]
+        chrome_key: Option<String>,
+        #[serde(default)]
+        managed_storage: Option<String>,
+    },
+    ManagedSchema {
+        #[serde(rename = "type")]
+        type_name: String,
+        schema: serde_json::Value,
     },
     Background {
         fn_name: String,
@@ -388,6 +410,8 @@ pub fn parse_entries(text: &str) -> anyhow::Result<ExtensionMetadata> {
     let mut commands = Vec::new();
     let mut backgrounds: Vec<(String, String)> = Vec::new();
     let mut scripts: Vec<String> = Vec::new();
+    let mut schemas: BTreeMap<String, serde_json::Value> = BTreeMap::new();
+    let mut managed_root: Option<String> = None;
     for line in text.lines().filter(|line| !line.trim().is_empty()) {
         let entry: Entry = serde_json::from_str(line).with_context(|| {
             format!(
@@ -413,7 +437,13 @@ pub fn parse_entries(text: &str) -> anyhow::Result<ExtensionMetadata> {
                 action,
                 rule_sets,
                 web_accessible,
+                oauth2,
+                chrome_key,
+                managed_storage: root,
             } => {
+                managed_root = root;
+                metadata.oauth2 = oauth2;
+                metadata.chrome_key = chrome_key;
                 metadata.rule_sets = rule_sets;
                 metadata.web_accessible = web_accessible;
                 metadata.optional_permissions = optional_permissions;
@@ -487,7 +517,18 @@ pub fn parse_entries(text: &str) -> anyhow::Result<ExtensionMetadata> {
                 column,
             } => scripts.push(format!("`{name}` ({file}:{line}:{column})")),
             Entry::Offscreen(offscreen) => metadata.offscreen.push(offscreen),
+            Entry::ManagedSchema { type_name, schema } => {
+                if let Some(other) = schemas.get(&type_name) {
+                    if other != &schema {
+                        bail!("two different types named `{type_name}` derive `ManagedSchema`; Chrome's schema tells them apart by name, so rename one");
+                    }
+                }
+                schemas.insert(type_name, schema);
+            }
         }
+    }
+    if let Some(root) = managed_root {
+        metadata.managed_schema = Some(resolve_managed_schema(&root, &schemas)?);
     }
 
     extensions.sort();
@@ -576,6 +617,39 @@ pub fn parse_entries(text: &str) -> anyhow::Result<ExtensionMetadata> {
     check_event_permissions(&metadata)?;
     check_cookies(&metadata)?;
     Ok(metadata)
+}
+
+/// Puts each `ManagedSchema` type's schema where another type points at it with `$ref`.
+fn resolve_managed_schema(root: &str, schemas: &BTreeMap<String, serde_json::Value>) -> anyhow::Result<serde_json::Value> {
+    fn fill(value: &serde_json::Value, schemas: &BTreeMap<String, serde_json::Value>, path: &mut Vec<String>) -> anyhow::Result<serde_json::Value> {
+        use serde_json::Value;
+        Ok(match value {
+            Value::Object(map) => {
+                if let Some(Value::String(name)) = map.get("$ref") {
+                    let Some(schema) = schemas.get(name) else {
+                        bail!("`{}` uses `{name}` in managed storage, but `{name}` doesn't derive `oxichrome::ManagedSchema`", path.last().map(String::as_str).unwrap_or("?"));
+                    };
+                    if path.contains(name) {
+                        bail!("managed storage can't hold a type inside itself (`{} -> {name}`)", path.join(" -> "));
+                    }
+                    path.push(name.clone());
+                    let filled = fill(schema, schemas, path)?;
+                    path.pop();
+                    return Ok(filled);
+                }
+                Value::Object(map.iter().map(|(key, value)| Ok((key.clone(), fill(value, schemas, path)?))).collect::<anyhow::Result<_>>()?)
+            }
+            Value::Array(items) => Value::Array(items.iter().map(|item| fill(item, schemas, path)).collect::<anyhow::Result<_>>()?),
+            other => other.clone(),
+        })
+    }
+    let Some(schema) = schemas.get(root) else {
+        bail!("`managed_storage = {root}`, but `{root}` doesn't derive `oxichrome::ManagedSchema`");
+    };
+    if schema.get("type").and_then(|kind| kind.as_str()) != Some("object") {
+        bail!("`managed_storage = {root}` must be a struct; managed storage is a set of named settings");
+    }
+    fill(schema, schemas, &mut vec![root.to_string()])
 }
 
 fn check_event_permission(metadata: &ExtensionMetadata, namespace: &str, permission: &str, variant: &str) -> anyhow::Result<bool> {
@@ -1130,7 +1204,7 @@ mod tests {
     fn with(base: &str, field: &str, value: &str) -> String {
         let marker = format!("\"{field}\":");
         let start = base.find(&marker).unwrap() + marker.len();
-        let end = start + base[start..].find(|c| c == ',' || c == '}').unwrap();
+        let end = start + base[start..].find([',', '}']).unwrap();
         format!("{}{value}{}", &base[..start], &base[end..])
     }
 
@@ -1252,5 +1326,26 @@ mod tests {
         assert!(optional("[]", r#"["scripting"]"#, "[]", r#"["https://a.com/*"]"#).is_ok());
         assert!(optional("[]", r#"["scripting","activeTab"]"#, "[]", "[]").is_ok());
         assert!(optional(r#"["scripting"]"#, "[]", "[]", "[]").is_err());
+    }
+
+    #[test]
+    fn managed_schemas_are_put_together() {
+        let line = |entry: serde_json::Value| entry.to_string() + "\n";
+        let extension = |root: &str| line(serde_json::json!({"kind":"extension","name":"M","version":"1.0.0","description":null,"gecko_id":null,"permissions":["storage"],"host_permissions":[],"icons":[],"action":null,"managed_storage":root}));
+        let policy = line(serde_json::json!({"kind":"managed_schema","type":"Policy","schema":{"type":"object","properties":{"theme":{"$ref":"Theme"},"sites":{"type":"array","items":{"$ref":"Site"}}}}}));
+        let theme = line(serde_json::json!({"kind":"managed_schema","type":"Theme","schema":{"type":"string","enum":["dark"]}}));
+        let site = line(serde_json::json!({"kind":"managed_schema","type":"Site","schema":{"type":"object","properties":{"url":{"type":"string"}}}}));
+        let metadata = parse_entries(&(extension("Policy") + &policy + &theme + &site)).unwrap();
+        assert_eq!(
+            metadata.managed_schema.unwrap(),
+            serde_json::json!({"type":"object","properties":{"theme":{"type":"string","enum":["dark"]},"sites":{"type":"array","items":{"type":"object","properties":{"url":{"type":"string"}}}}}})
+        );
+        let missing = parse_entries(&(extension("Policy") + &policy + &theme)).unwrap_err().to_string();
+        assert!(missing.contains("`Site` doesn't derive"), "{missing}");
+        let not_object = parse_entries(&(extension("Theme") + &theme)).unwrap_err().to_string();
+        assert!(not_object.contains("must be a struct"), "{not_object}");
+        let looped = line(serde_json::json!({"kind":"managed_schema","type":"Node","schema":{"type":"object","properties":{"next":{"$ref":"Node"}}}}));
+        let looped = parse_entries(&(extension("Node") + &looped)).unwrap_err().to_string();
+        assert!(looped.contains("inside itself"), "{looped}");
     }
 }

@@ -68,6 +68,11 @@ pub fn run(release: bool, browser: Browser) -> Result<()> {
         Browser::Firefox => "firefox",
     };
     let dist_dir = crate_dir.join("dist").join(browser_dir);
+    // Start from an empty folder so pages, content scripts and static files dropped from
+    // the extension don't linger from an earlier build.
+    if dist_dir.exists() {
+        fs::remove_dir_all(&dist_dir).with_context(|| format!("failed to clear {}", dist_dir.display()))?;
+    }
     let wasm_dist_dir = dist_dir.join("wasm");
     fs::create_dir_all(&wasm_dist_dir).context("failed to create dist/wasm directory")?;
 
@@ -97,6 +102,10 @@ pub fn run(release: bool, browser: Browser) -> Result<()> {
         .with_context(|| format!("failed to write {}", wasm_output.display()))?;
 
     let manifest_json = manifest::generate_manifest(&metadata, browser)?;
+    if let (Some(schema), Browser::Chromium) = (&metadata.managed_schema, browser) {
+        fs::write(dist_dir.join(manifest::MANAGED_SCHEMA_FILE), serde_json::to_string_pretty(schema)?)
+            .context("failed to write the managed storage schema")?;
+    }
     fs::write(dist_dir.join("manifest.json"), &manifest_json)
         .context("failed to write manifest.json")?;
     println!("[oxichrome] Generated manifest.json");
@@ -179,12 +188,6 @@ pub fn run(release: bool, browser: Browser) -> Result<()> {
         println!("[oxichrome] Generated options.html + options.js");
     }
 
-    for stale in ["offscreen.html", "offscreen.js", "offscreen.json"] {
-        let path = dist_dir.join(stale);
-        if path.exists() {
-            fs::remove_file(&path).with_context(|| format!("failed to remove stale {stale}"))?;
-        }
-    }
     if !metadata.offscreen.is_empty() {
         for file in ["offscreen.html", "offscreen.js", "offscreen.json"] {
             if crate_dir.join("static").join(file).exists() {
@@ -209,10 +212,6 @@ pub fn run(release: bool, browser: Browser) -> Result<()> {
         println!("[oxichrome] Generated {cs_filename}");
     }
 
-    let stale_locales = dist_dir.join("_locales");
-    if stale_locales.exists() {
-        fs::remove_dir_all(&stale_locales).context("failed to clear dist/_locales")?;
-    }
     let static_dir = crate_dir.join("static");
     if static_dir.is_dir() {
         println!("[oxichrome] Copying static assets...");

@@ -57,7 +57,7 @@ pub fn color(site: &str) -> Color {
 }
 
 pub async fn all() -> Vec<Tab> {
-    tabs::query(&json!({})).await.unwrap_or_default()
+    tabs::query(&tabs::Query::new()).await.unwrap_or_default()
 }
 
 pub async fn switch_to(tab_id: i32, window_id: i32) -> Result<()> {

@@ -34,6 +34,7 @@ fn js_error_message(val: &JsValue) -> String {
 }
 
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum OxichromeError {
     #[error("JS error: {0}")]
     Js(#[from] JsError),
@@ -49,6 +50,9 @@ pub enum OxichromeError {
 
     #[error("limit exceeded: {0}")]
     LimitExceeded(String),
+
+    #[error("sign-in failed: {0}")]
+    Auth(#[from] crate::identity::AuthError),
 }
 
 impl From<JsValue> for OxichromeError {
@@ -63,4 +67,6 @@ impl From<serde_wasm_bindgen::Error> for OxichromeError {
     }
 }
 
-pub type Result<T> = std::result::Result<T, OxichromeError>;
+/// `Result` with [`OxichromeError`] as the error unless another is named, so
+/// `Result<JsValue, JsValue>` (as `#[wasm_bindgen(catch)]` wants) still works with the prelude.
+pub type Result<T, E = OxichromeError> = std::result::Result<T, E>;

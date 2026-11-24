@@ -60,6 +60,45 @@ impl ResourceType {
             other => ResourceType::Other(other.to_string()),
         }
     }
+
+    /// Chrome's name for it, like `main_frame` or `xmlhttprequest`
+    /// (for `Other`, the name the browser gave).
+    pub fn as_str(&self) -> &str {
+        match self {
+            ResourceType::MainFrame => "main_frame",
+            ResourceType::SubFrame => "sub_frame",
+            ResourceType::Stylesheet => "stylesheet",
+            ResourceType::Script => "script",
+            ResourceType::Image => "image",
+            ResourceType::Font => "font",
+            ResourceType::Object => "object",
+            ResourceType::XmlHttpRequest => "xmlhttprequest",
+            ResourceType::Ping => "ping",
+            ResourceType::CspReport => "csp_report",
+            ResourceType::Media => "media",
+            ResourceType::WebSocket => "websocket",
+            ResourceType::Other(name) => name,
+        }
+    }
+}
+
+impl std::fmt::Display for ResourceType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl Serialize for ResourceType {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for ResourceType {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> std::result::Result<Self, D::Error> {
+        let name = String::deserialize(deserializer)?;
+        Ok(ResourceType::parse(&name))
+    }
 }
 
 /// The request, passed first to every `web_request` event.
@@ -472,6 +511,13 @@ mod tests {
         assert_eq!(ResourceType::parse("imageset"), ResourceType::Image);
         assert_eq!(ResourceType::parse("beacon"), ResourceType::Ping);
         assert_eq!(ResourceType::parse("webbundle"), ResourceType::Other("webbundle".into()));
+        for kind in ["main_frame", "sub_frame", "stylesheet", "script", "image", "font", "object", "xmlhttprequest", "ping", "csp_report", "media", "websocket", "webbundle"] {
+            assert_eq!(ResourceType::parse(kind).as_str(), kind);
+            assert_eq!(ResourceType::parse(kind).to_string(), kind);
+        }
+        let json = serde_json::to_string(&ResourceType::XmlHttpRequest).unwrap();
+        assert_eq!(json, "\"xmlhttprequest\"");
+        assert_eq!(serde_json::from_str::<ResourceType>("\"imageset\"").unwrap(), ResourceType::Image);
     }
 
     #[test]
