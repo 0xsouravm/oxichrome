@@ -63,4 +63,6 @@ impl From<serde_wasm_bindgen::Error> for OxichromeError {
     }
 }
 
-pub type Result<T> = std::result::Result<T, OxichromeError>;
+/// `Result` with [`OxichromeError`] as the error unless another is named, so
+/// `Result<JsValue, JsValue>` (as `#[wasm_bindgen(catch)]` wants) still works with the prelude.
+pub type Result<T, E = OxichromeError> = std::result::Result<T, E>;

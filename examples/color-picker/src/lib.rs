@@ -29,7 +29,7 @@ extern "C" {
     type ColorSelection;
 
     #[wasm_bindgen(constructor, catch)]
-    fn new() -> std::result::Result<EyeDropper, JsValue>;
+    fn new() -> Result<EyeDropper, JsValue>;
 
     #[wasm_bindgen(method)]
     fn open(this: &EyeDropper) -> js_sys::Promise;
