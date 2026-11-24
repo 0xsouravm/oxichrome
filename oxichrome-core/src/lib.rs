@@ -8,6 +8,7 @@ pub mod context_menus;
 pub mod content_script;
 pub mod cookies;
 pub mod devtools;
+pub mod declarative_content;
 pub mod declarative_net_request;
 pub mod downloads;
 pub mod error;

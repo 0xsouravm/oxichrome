@@ -2158,6 +2158,42 @@ extern "C" {
     pub fn ai_destroy(object: &JsValue);
 }
 
+#[wasm_bindgen(inline_js = r#"
+function events() {
+    const api = globalThis.chrome?.declarativeContent;
+    if (!api) { throw new Error('oxichrome:no-permission'); }
+    return api;
+}
+// `onPageChanged` takes callbacks; it doesn't return promises.
+function onPageChanged(method, ...args) {
+    return new Promise((resolve, reject) => events().onPageChanged[method](...args, (result) => {
+        const error = chrome.runtime.lastError;
+        if (error) { reject(new Error(error.message)); } else { resolve(result); }
+    }));
+}
+export function declarative_content_set(rules) {
+    const api = events();
+    return onPageChanged('removeRules').then(() => {
+        if (!rules.length) { return; }
+        return onPageChanged('addRules', rules.map((rule) => ({
+            conditions: rule.pages.map((page) => new api.PageStateMatcher(page)),
+            actions: [new api.ShowAction()],
+        })));
+    });
+}
+export function declarative_content_get() {
+    return onPageChanged('getRules').then((rules) => rules.map((rule) => ({
+        pages: rule.conditions.map(({ instanceType, ...page }) => page),
+    })));
+}
+"#)]
+extern "C" {
+    #[wasm_bindgen(catch)]
+    pub fn declarative_content_set(rules: &JsValue) -> Result<js_sys::Promise, JsValue>;
+    #[wasm_bindgen(catch)]
+    pub fn declarative_content_get() -> Result<js_sys::Promise, JsValue>;
+}
+
 #[wasm_bindgen(module = "/js/browser.js")]
 extern "C" {
     /// Whether this is Firefox. The answer comes from `js/browser.js`, which every
