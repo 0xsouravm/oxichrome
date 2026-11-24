@@ -2253,6 +2253,20 @@ extern "C" {
     pub fn capture_open(source: &str, id: &str, audio: bool, video: bool) -> Result<js_sys::Promise, JsValue>;
 }
 
+#[wasm_bindgen(inline_js = r#"
+import { isFirefox } from './js/browser.js';
+export function api_call(path, method, args) {
+    let target = isFirefox ? globalThis.browser : globalThis.chrome;
+    for (const part of path.split('.')) { target = target?.[part]; }
+    if (typeof target?.[method] !== 'function') { throw new Error('oxichrome:no-permission'); }
+    return Promise.resolve(target[method](...args));
+}
+"#)]
+extern "C" {
+    #[wasm_bindgen(catch)]
+    pub fn api_call(path: &str, method: &str, args: &js_sys::Array) -> Result<js_sys::Promise, JsValue>;
+}
+
 #[wasm_bindgen(module = "/js/browser.js")]
 extern "C" {
     /// Whether this is Firefox. The answer comes from `js/browser.js`, which every
