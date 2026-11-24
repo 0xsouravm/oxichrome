@@ -236,13 +236,28 @@ fn is_internal(message: &JsValue) -> bool {
             .any(|key: JsValue| key.as_string().is_some_and(|key| key.starts_with("__oxichrome_")))
 }
 
-/// A message listener added with [`listen`].
-pub struct Listener(JsValue);
+/// A listener added with [`listen`], [`on_connect`], `storage::on_changed` or `tabs::on_activated`.
+/// It keeps listening until [`remove`](Listener::remove) is called; dropping it doesn't stop it.
+pub struct Listener {
+    remove: Option<js_sys::Function>,
+}
 
 impl Listener {
+    /// Adds `callback` to `chrome[api][event]`, or `None` when this context doesn't have it.
+    pub(crate) fn add(api: &str, event: &str, callback: &JsValue) -> Option<Listener> {
+        Listener::from_remover(js_bridge::event_add(api, event, callback))
+    }
+
+    /// Wraps a function that removes the listener, or `None` when `remove` isn't one.
+    pub(crate) fn from_remover(remove: JsValue) -> Option<Listener> {
+        remove.is_function().then(|| Listener { remove: Some(remove.unchecked_into()) })
+    }
+
     /// Stops listening.
     pub fn remove(self) {
-        js_bridge::runtime_remove_listener(&self.0);
+        if let Some(remove) = self.remove {
+            let _ = remove.call0(&JsValue::NULL);
+        }
     }
 }
 
@@ -293,8 +308,7 @@ where
         },
     )
     .into_js_value();
-    js_bridge::runtime_add_listener(&callback);
-    Listener(callback)
+    Listener::add("runtime", "onMessage", &callback).unwrap_or(Listener { remove: None })
 }
 
 /// A long-lived connection between two parts of the extension.
@@ -396,8 +410,7 @@ where
         wasm_bindgen_futures::spawn_local(handler(port));
     })
     .into_js_value();
-    js_bridge::runtime_on_connect_add(&callback);
-    Listener(callback)
+    Listener::add("runtime", "onConnect", &callback).unwrap_or(Listener { remove: None })
 }
 
 /// The operating system the browser runs on.

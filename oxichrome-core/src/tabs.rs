@@ -104,6 +104,21 @@ impl EventArg<events::TabsOnDetached, 1> for i32 {}
 impl EventArg<events::TabsOnDetached, 2> for Detached {}
 impl EventArg<events::TabsOnHighlighted, 1> for Highlighted {}
 
+pub use crate::runtime::Listener;
+
+/// Runs `handler` each time the user switches tabs, in a popup, options page, side panel or
+/// offscreen document. The background uses `#[oxichrome::on(tabs::on_activated)]` instead.
+pub fn on_activated(handler: impl Fn(Activated) + 'static) -> Result<Listener> {
+    let callback = wasm_bindgen::closure::Closure::<dyn Fn(JsValue)>::new(move |info: JsValue| {
+        if let Ok(info) = crate::json::from_js::<Activated>(&info) {
+            handler(info);
+        }
+    })
+    .into_js_value();
+    Listener::add("tabs", "onActivated", &callback)
+        .ok_or_else(|| OxichromeError::InvalidArgument("`tabs` isn't available here (content scripts don't have it)".into()))
+}
+
 macro_rules! event_info {
     ($($(#[$doc:meta])* $name:ident { $($(#[$field_doc:meta])* $field:ident: $ty:ty),* $(,)? })*) => {
         $(

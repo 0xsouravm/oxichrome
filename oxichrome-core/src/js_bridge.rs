@@ -1593,11 +1593,11 @@ export function tabs_connect(tab, name, frame) {
 export function tabs_send_message_to(tab, message, frame) {
     return chrome.tabs.sendMessage(tab, message, frame === undefined ? {} : { frameId: frame });
 }
-export function runtime_on_connect_add(callback) { chrome.runtime.onConnect.addListener(callback); }
-export function runtime_add_listener(callback) { chrome.runtime.onMessage.addListener(callback); }
-export function runtime_remove_listener(callback) {
-    chrome.runtime.onMessage.removeListener(callback);
-    chrome.runtime.onConnect.removeListener(callback);
+export function event_add(api, event, callback) {
+    const target = globalThis.chrome?.[api]?.[event];
+    if (typeof target?.addListener !== 'function') { return undefined; }
+    target.addListener(callback);
+    return () => target.removeListener(callback);
 }
 export function runtime_id() { return chrome.runtime.id; }
 export function runtime_manifest() { return chrome.runtime.getManifest(); }
@@ -1623,9 +1623,9 @@ extern "C" {
     pub fn tabs_connect(tab: i32, name: &str, frame: Option<f64>) -> Result<JsValue, JsValue>;
     #[wasm_bindgen(catch)]
     pub fn tabs_send_message_to(tab: i32, message: &JsValue, frame: Option<f64>) -> Result<js_sys::Promise, JsValue>;
-    pub fn runtime_on_connect_add(callback: &JsValue);
-    pub fn runtime_add_listener(callback: &JsValue);
-    pub fn runtime_remove_listener(callback: &JsValue);
+    /// Adds `callback` to `chrome[api][event]` and returns a function that removes it,
+    /// or `undefined` when this context doesn't have that event.
+    pub fn event_add(api: &str, event: &str, callback: &JsValue) -> JsValue;
     pub fn runtime_id() -> String;
     pub fn runtime_manifest() -> JsValue;
     #[wasm_bindgen(catch)]
