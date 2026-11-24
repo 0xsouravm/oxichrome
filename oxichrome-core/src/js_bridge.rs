@@ -1949,6 +1949,44 @@ extern "C" {
     pub fn proxy_on_error(callback: &JsValue) -> JsValue;
 }
 
+#[wasm_bindgen(inline_js = r#"
+function api() {
+    const identity = globalThis.chrome?.identity;
+    if (!identity) { throw new Error('oxichrome:no-permission'); }
+    return identity;
+}
+const base64url = (bytes) => btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+export function identity_redirect_url(path) { return api().getRedirectURL(path); }
+export function identity_launch(url, interactive) { return api().launchWebAuthFlow({ url, interactive }); }
+export function identity_random() {
+    return Array.from(crypto.getRandomValues(new Uint8Array(16)), (byte) => byte.toString(16).padStart(2, '0')).join('');
+}
+export async function identity_pkce() {
+    const verifier = base64url(crypto.getRandomValues(new Uint8Array(32)));
+    const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier));
+    return [verifier, base64url(new Uint8Array(digest))];
+}
+export function identity_google_token(interactive, scopes) {
+    return api().getAuthToken(scopes.length ? { interactive, scopes } : { interactive });
+}
+export function identity_remove_google_token(token) { return api().removeCachedAuthToken({ token }); }
+export function identity_profile() { return api().getProfileUserInfo({}); }
+"#)]
+extern "C" {
+    #[wasm_bindgen(catch)]
+    pub fn identity_redirect_url(path: &str) -> Result<String, JsValue>;
+    #[wasm_bindgen(catch)]
+    pub fn identity_launch(url: &str, interactive: bool) -> Result<js_sys::Promise, JsValue>;
+    pub fn identity_random() -> String;
+    pub fn identity_pkce() -> js_sys::Promise;
+    #[wasm_bindgen(catch)]
+    pub fn identity_google_token(interactive: bool, scopes: &js_sys::Array) -> Result<js_sys::Promise, JsValue>;
+    #[wasm_bindgen(catch)]
+    pub fn identity_remove_google_token(token: &str) -> Result<js_sys::Promise, JsValue>;
+    #[wasm_bindgen(catch)]
+    pub fn identity_profile() -> Result<js_sys::Promise, JsValue>;
+}
+
 #[wasm_bindgen(module = "/js/browser.js")]
 extern "C" {
     /// Whether this is Firefox. The answer comes from `js/browser.js`, which every

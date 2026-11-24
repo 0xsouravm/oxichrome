@@ -37,6 +37,15 @@ pub struct ExtensionMetadata {
     pub rule_sets: Vec<RuleSet>,
     pub web_accessible: Vec<String>,
     pub offscreen: Vec<OffscreenFn>,
+    pub oauth2: Option<OAuth2>,
+    pub chrome_key: Option<String>,
+}
+
+/// Chrome's `oauth2` manifest key, for `identity::google_token`.
+#[derive(Debug, Clone, PartialEq, Deserialize, serde::Serialize)]
+pub struct OAuth2 {
+    pub client_id: String,
+    pub scopes: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -231,6 +240,10 @@ enum Entry {
         rule_sets: Vec<RuleSet>,
         #[serde(default)]
         web_accessible: Vec<String>,
+        #[serde(default)]
+        oauth2: Option<OAuth2>,
+        #[serde(default)]
+        chrome_key: Option<String>,
     },
     Background {
         fn_name: String,
@@ -413,7 +426,11 @@ pub fn parse_entries(text: &str) -> anyhow::Result<ExtensionMetadata> {
                 action,
                 rule_sets,
                 web_accessible,
+                oauth2,
+                chrome_key,
             } => {
+                metadata.oauth2 = oauth2;
+                metadata.chrome_key = chrome_key;
                 metadata.rule_sets = rule_sets;
                 metadata.web_accessible = web_accessible;
                 metadata.optional_permissions = optional_permissions;

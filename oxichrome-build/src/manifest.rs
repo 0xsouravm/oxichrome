@@ -45,6 +45,10 @@ struct Manifest {
     commands: BTreeMap<String, ManifestCommand>,
     #[serde(skip_serializing_if = "Option::is_none")]
     declarative_net_request: Option<DeclarativeNetRequest>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    oauth2: Option<crate::metadata::OAuth2>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    key: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -298,6 +302,8 @@ pub fn generate_manifest(metadata: &ExtensionMetadata, browser: Browser) -> anyh
                 .map(|set| RuleResource { id: set.id.clone(), enabled: set.enabled, path: set.path.clone() })
                 .collect(),
         }),
+        oauth2: metadata.oauth2.clone().filter(|_| browser == Browser::Chromium),
+        key: metadata.chrome_key.clone().filter(|_| browser == Browser::Chromium),
         commands: {
             let mut commands: BTreeMap<String, ManifestCommand> = metadata
                 .commands
@@ -468,6 +474,8 @@ mod tests {
             has_options_page: true,
             side_panel: None,
             devtools_panels: Vec::new(),
+            oauth2: None,
+            chrome_key: None,
             omnibox: None,
             popup_styles: Vec::new(),
             options_styles: Vec::new(),
@@ -523,6 +531,8 @@ mod tests {
             has_options_page: false,
             side_panel: None,
             devtools_panels: Vec::new(),
+            oauth2: None,
+            chrome_key: None,
             omnibox: None,
             popup_styles: Vec::new(),
             options_styles: Vec::new(),
@@ -580,6 +590,8 @@ mod tests {
             has_options_page: false,
             side_panel: None,
             devtools_panels: Vec::new(),
+            oauth2: None,
+            chrome_key: None,
             omnibox: None,
             popup_styles: Vec::new(),
             options_styles: Vec::new(),
@@ -664,6 +676,8 @@ mod tests {
             has_options_page: false,
             side_panel: None,
             devtools_panels: Vec::new(),
+            oauth2: None,
+            chrome_key: None,
             omnibox: None,
             popup_styles: Vec::new(),
             options_styles: Vec::new(),
@@ -829,5 +843,16 @@ mod tests {
         let parsed: serde_json::Value =
             serde_json::from_str(&generate_manifest(&metadata, Browser::Chromium).unwrap()).unwrap();
         assert!(parsed.get("commands").is_none());
+    }
+
+    #[test]
+    fn oauth2_and_key_are_chrome_only() {
+        let text = r#"{"kind":"extension","name":"O","version":"1.0.0","description":null,"gecko_id":"o@example.com","permissions":["identity"],"host_permissions":[],"icons":[],"action":null,"oauth2":{"client_id":"1-a.apps.googleusercontent.com","scopes":["email"]},"chrome_key":"KEY"}"#;
+        let metadata = crate::metadata::parse_entries(text).unwrap();
+        let chrome: serde_json::Value = serde_json::from_str(&generate_manifest(&metadata, Browser::Chromium).unwrap()).unwrap();
+        assert_eq!(chrome["oauth2"], serde_json::json!({"client_id":"1-a.apps.googleusercontent.com","scopes":["email"]}));
+        assert_eq!(chrome["key"], "KEY");
+        let firefox: serde_json::Value = serde_json::from_str(&generate_manifest(&metadata, Browser::Firefox).unwrap()).unwrap();
+        assert!(firefox.get("oauth2").is_none() && firefox.get("key").is_none(), "{firefox}");
     }
 }

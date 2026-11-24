@@ -13,6 +13,7 @@ pub mod error;
 pub mod event;
 pub mod history;
 pub mod i18n;
+pub mod identity;
 pub mod idle;
 pub mod js_bridge;
 pub mod management;

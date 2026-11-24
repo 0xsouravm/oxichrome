@@ -168,6 +168,51 @@ pub struct ExtensionArgs {
     pub rule_sets: Vec<(Ident, LitStr)>,
     pub disabled_rule_sets: Vec<Ident>,
     pub web_accessible: Vec<LitStr>,
+    pub oauth2: Option<OAuth2Args>,
+    pub chrome_key: Option<LitStr>,
+}
+
+/// `oauth2 = { client_id = "...", scopes = [...] }`, for Chrome's `identity::google_token`.
+#[derive(Debug)]
+pub struct OAuth2Args {
+    pub client_id: LitStr,
+    pub scopes: Vec<LitStr>,
+}
+
+fn parse_oauth2(input: ParseStream) -> syn::Result<OAuth2Args> {
+    let content;
+    let brace = syn::braced!(content in input);
+    let mut client_id: Option<LitStr> = None;
+    let mut scopes: Option<Vec<LitStr>> = None;
+    while !content.is_empty() {
+        let key: Ident = content.parse()?;
+        content.parse::<Token![=]>()?;
+        match key.to_string().as_str() {
+            "client_id" => {
+                let id: LitStr = content.parse()?;
+                if id.value().trim().is_empty() || id.value().contains(char::is_whitespace) {
+                    return Err(syn::Error::new(id.span(), "the OAuth client id is empty or has spaces; copy it from the Google Cloud console, like `1234-abcd.apps.googleusercontent.com`"));
+                }
+                client_id = Some(id);
+            }
+            "scopes" => {
+                let list;
+                syn::bracketed!(list in content);
+                let items = syn::punctuated::Punctuated::<LitStr, Token![,]>::parse_terminated(&list)?;
+                let items: Vec<LitStr> = items.into_iter().collect();
+                if let Some(empty) = items.iter().find(|scope| scope.value().trim().is_empty()) {
+                    return Err(syn::Error::new(empty.span(), "an OAuth scope is empty"));
+                }
+                scopes = Some(items);
+            }
+            other => return Err(syn::Error::new(key.span(), format!("`oauth2` takes `client_id` and `scopes`, not `{other}`"))),
+        }
+        if !content.is_empty() {
+            content.parse::<Token![,]>()?;
+        }
+    }
+    let client_id = client_id.ok_or_else(|| syn::Error::new(brace.span.join(), "`oauth2` needs a `client_id`"))?;
+    Ok(OAuth2Args { client_id, scopes: scopes.unwrap_or_default() })
 }
 
 #[derive(Debug)]
@@ -523,6 +568,8 @@ impl Parse for ExtensionArgs {
         let mut rule_sets: Vec<(Ident, LitStr)> = Vec::new();
         let mut disabled_rule_sets: Vec<Ident> = Vec::new();
         let mut web_accessible: Vec<LitStr> = Vec::new();
+        let mut oauth2: Option<OAuth2Args> = None;
+        let mut chrome_key: Option<LitStr> = None;
         let mut rule_sets_span: Option<proc_macro2::Span> = None;
 
         while !input.is_empty() {
@@ -541,6 +588,17 @@ impl Parse for ExtensionArgs {
                 }
                 "description" => {
                     description = Some(Text::parse_field(input, "description")?);
+                }
+                "oauth2" => {
+                    oauth2 = Some(parse_oauth2(input)?);
+                }
+                "chrome_key" => {
+                    let key: LitStr = input.parse()?;
+                    let text = key.value();
+                    if text.len() < 100 || !text.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '/' | '=')) {
+                        return Err(syn::Error::new(key.span(), "`chrome_key` is the base64 public key from Chrome's packed extension (the `key` field of its manifest), with no line breaks or `-----BEGIN` header"));
+                    }
+                    chrome_key = Some(key);
                 }
                 "gecko_id" => {
                     let id: LitStr = input.parse()?;
@@ -681,7 +739,15 @@ impl Parse for ExtensionArgs {
             }
         }
 
+        if let Some(oauth2) = &oauth2 {
+            if !permissions.iter().chain(&optional_permissions).any(|declared| declared.info.ident == "Identity") {
+                return Err(syn::Error::new(oauth2.client_id.span(), "`oauth2` is for `identity::google_token`; add `Identity` to `permissions`"));
+            }
+        }
+
         Ok(ExtensionArgs {
+            oauth2,
+            chrome_key,
             name,
             version,
             description,

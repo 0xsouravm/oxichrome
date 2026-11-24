@@ -34,6 +34,7 @@ fn js_error_message(val: &JsValue) -> String {
 }
 
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum OxichromeError {
     #[error("JS error: {0}")]
     Js(#[from] JsError),
@@ -49,6 +50,9 @@ pub enum OxichromeError {
 
     #[error("limit exceeded: {0}")]
     LimitExceeded(String),
+
+    #[error("sign-in failed: {0}")]
+    Auth(#[from] crate::identity::AuthError),
 }
 
 impl From<JsValue> for OxichromeError {
