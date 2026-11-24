@@ -45,6 +45,7 @@ pub use oxichrome_core::storage;
 pub use oxichrome_core::tab_capture;
 pub use oxichrome_core::tab_groups;
 pub use oxichrome_core::tabs;
+pub use oxichrome_core::theme;
 pub use oxichrome_core::top_sites;
 pub use oxichrome_core::tts;
 pub use oxichrome_core::user_scripts;
