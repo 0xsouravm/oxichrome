@@ -11,6 +11,7 @@ pub mod content_settings;
 pub mod contextual_identities;
 pub mod cookies;
 pub mod devtools;
+pub mod debugger;
 pub mod declarative_content;
 pub mod desktop_capture;
 pub mod declarative_net_request;

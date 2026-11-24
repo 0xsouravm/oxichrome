@@ -53,6 +53,9 @@ pub enum OxichromeError {
 
     #[error("sign-in failed: {0}")]
     Auth(#[from] crate::identity::AuthError),
+
+    #[error("{0}")]
+    Debugger(#[from] crate::debugger::CommandError),
 }
 
 impl From<JsValue> for OxichromeError {

@@ -14,6 +14,7 @@ pub use oxichrome_core::context_menus;
 pub use oxichrome_core::content_settings;
 pub use oxichrome_core::contextual_identities;
 pub use oxichrome_core::cookies;
+pub use oxichrome_core::debugger;
 pub use oxichrome_core::declarative_content;
 pub use oxichrome_core::desktop_capture;
 pub use oxichrome_core::declarative_net_request;
