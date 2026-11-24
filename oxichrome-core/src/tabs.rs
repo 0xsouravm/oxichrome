@@ -154,6 +154,122 @@ event_info! {
     Highlighted { window_id: i32, tab_ids: Vec<i32> }
 }
 
+/// What [`query`] looks for. Every condition set must hold; an empty query matches every tab.
+///
+/// ```ignore
+/// let pinned: Vec<Tab> = tabs::query(&Query::new().pinned(true).in_current_window()).await?;
+/// ```
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Query {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    active: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    current_window: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    last_focused_window: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    window_id: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pinned: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    audible: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    muted: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    highlighted: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    discarded: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    group_id: Option<i64>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    url: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    title: Option<String>,
+}
+
+impl Query {
+    /// Matches every tab.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Only the tab shown in its window (`true`) or only the ones behind it (`false`).
+    pub fn active(mut self, active: bool) -> Self {
+        self.active = Some(active);
+        self
+    }
+
+    /// Only tabs in the window this code runs in (for the background, the last focused one).
+    pub fn in_current_window(mut self) -> Self {
+        self.current_window = Some(true);
+        self
+    }
+
+    /// Only tabs in the window the user last focused.
+    pub fn in_last_focused_window(mut self) -> Self {
+        self.last_focused_window = Some(true);
+        self
+    }
+
+    pub fn in_window(mut self, window_id: i32) -> Self {
+        self.window_id = Some(window_id);
+        self
+    }
+
+    pub fn pinned(mut self, pinned: bool) -> Self {
+        self.pinned = Some(pinned);
+        self
+    }
+
+    pub fn audible(mut self, audible: bool) -> Self {
+        self.audible = Some(audible);
+        self
+    }
+
+    pub fn muted(mut self, muted: bool) -> Self {
+        self.muted = Some(muted);
+        self
+    }
+
+    pub fn highlighted(mut self, highlighted: bool) -> Self {
+        self.highlighted = Some(highlighted);
+        self
+    }
+
+    pub fn discarded(mut self, discarded: bool) -> Self {
+        self.discarded = Some(discarded);
+        self
+    }
+
+    /// Only tabs in this tab group.
+    pub fn in_group(mut self, group_id: i64) -> Self {
+        self.group_id = Some(group_id);
+        self
+    }
+
+    /// Only tabs whose URL matches this match pattern, like `https://*.example.com/*`.
+    /// Call it more than once to match any of several patterns. Needs the `Tabs`
+    /// permission or host permission for the URLs.
+    pub fn url(mut self, pattern: impl Into<String>) -> Self {
+        self.url.push(pattern.into());
+        self
+    }
+
+    /// Only tabs whose title matches this pattern (`*` matches anything).
+    pub fn title(mut self, pattern: impl Into<String>) -> Self {
+        self.title = Some(pattern.into());
+        self
+    }
+}
+
+/// The tab the user is looking at in the current window, if there is one.
+pub async fn active_tab() -> Result<Option<Tab>> {
+    let found: Vec<Tab> = query(&Query::new().active(true).in_current_window()).await?;
+    Ok(found.into_iter().next())
+}
+
+/// Finds tabs. Pass a [`Query`] and read them as [`Tab`]s, or pass and read your own types.
 pub async fn query<Q: Serialize, T: DeserializeOwned>(query_info: &Q) -> Result<Vec<T>> {
     let js_query = crate::json::to_js(query_info)?;
     let promise = js_bridge::chrome_tabs_query(&js_query)?;
@@ -416,4 +532,24 @@ pub async fn ungroup(tab_ids: &[i32]) -> Result<()> {
     }
     call(js_bridge::tabs_group_call("ungroup", &crate::json::to_js(tab_ids)?)).await.map_err(crate::tab_groups::group_error)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod query_tests {
+    use super::Query;
+
+    #[test]
+    fn query_sends_only_what_was_set() {
+        assert_eq!(serde_json::to_value(Query::new()).unwrap(), serde_json::json!({}));
+        let query = Query::new().active(true).in_current_window().url("https://*.example.com/*").url("*://rust-lang.org/*").in_group(4);
+        assert_eq!(
+            serde_json::to_value(query).unwrap(),
+            serde_json::json!({
+                "active": true,
+                "currentWindow": true,
+                "groupId": 4,
+                "url": ["https://*.example.com/*", "*://rust-lang.org/*"],
+            })
+        );
+    }
 }
