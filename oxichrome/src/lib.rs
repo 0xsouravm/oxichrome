@@ -39,6 +39,7 @@ pub use oxichrome_core::search;
 pub use oxichrome_core::sessions;
 pub use oxichrome_core::side_panel;
 pub use oxichrome_core::devtools;
+pub use oxichrome_core::dns;
 pub use oxichrome_core::storage;
 pub use oxichrome_core::tab_capture;
 pub use oxichrome_core::tab_groups;

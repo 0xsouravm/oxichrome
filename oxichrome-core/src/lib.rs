@@ -14,6 +14,7 @@ pub mod devtools;
 pub mod declarative_content;
 pub mod desktop_capture;
 pub mod declarative_net_request;
+pub mod dns;
 pub mod downloads;
 pub mod error;
 pub mod event;
