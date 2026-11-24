@@ -24,6 +24,7 @@ pub use oxichrome_core::omnibox;
 pub use oxichrome_core::permissions;
 pub use oxichrome_core::permissions::Permission;
 pub use oxichrome_core::privacy;
+pub use oxichrome_core::proxy;
 pub use oxichrome_core::runtime;
 pub use oxichrome_core::scripting;
 pub use oxichrome_core::search;

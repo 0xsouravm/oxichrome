@@ -1918,6 +1918,37 @@ extern "C" {
     pub fn privacy_on_change(group: &str, key: &str, callback: &JsValue) -> JsValue;
 }
 
+#[wasm_bindgen(inline_js = r#"
+import { isFirefox } from './js/browser.js';
+function api() {
+    const proxy = globalThis.chrome?.proxy;
+    if (!proxy) { throw new Error('oxichrome:no-permission'); }
+    return proxy;
+}
+export function proxy_call(op, value) {
+    const settings = api().settings;
+    if (op === 'get') { return settings.get({}); }
+    if (op === 'set') { return settings.set({ value }).then(() => undefined); }
+    return settings.clear({}).then(() => undefined);
+}
+export function proxy_allowed() {
+    if (!globalThis.chrome?.proxy) { return Promise.resolve(false); }
+    return isFirefox ? globalThis.browser.extension.isAllowedIncognitoAccess() : Promise.resolve(true);
+}
+export function proxy_on_error(callback) {
+    const event = isFirefox ? globalThis.chrome?.proxy?.onError : globalThis.chrome?.proxy?.onProxyError;
+    if (!event) { return undefined; }
+    event.addListener(callback);
+    return () => event.removeListener(callback);
+}
+"#)]
+extern "C" {
+    #[wasm_bindgen(catch)]
+    pub fn proxy_call(op: &str, value: &JsValue) -> Result<js_sys::Promise, JsValue>;
+    pub fn proxy_allowed() -> js_sys::Promise;
+    pub fn proxy_on_error(callback: &JsValue) -> JsValue;
+}
+
 #[wasm_bindgen(module = "/js/browser.js")]
 extern "C" {
     /// Whether this is Firefox. The answer comes from `js/browser.js`, which every

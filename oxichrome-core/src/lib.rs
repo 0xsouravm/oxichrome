@@ -22,6 +22,7 @@ pub mod offscreen;
 pub mod omnibox;
 pub mod permissions;
 pub mod privacy;
+pub mod proxy;
 pub mod runtime;
 pub mod scripting;
 pub mod search;
