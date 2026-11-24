@@ -1866,3 +1866,30 @@ extern "C" {
     #[wasm_bindgen(js_name = on_sessions_changed)]
     pub fn chrome_sessions_on_changed_add_listener(callback: &Closure<dyn FnMut(JsValue)>);
 }
+
+#[wasm_bindgen(inline_js = r#"
+import { isFirefox } from './js/browser.js';
+export function browsing_data_clear(names, since, origins, hosts) {
+    const api = globalThis.chrome?.browsingData;
+    if (!api) { throw new Error('oxichrome:no-permission'); }
+    const options = { since };
+    if (origins.length) {
+        if (isFirefox) { options.hostnames = hosts; } else { options.origins = origins; }
+    }
+    const data = {};
+    for (const name of names) { data[name] = true; }
+    return api.remove(options, data).then(() => undefined);
+}
+export function browsing_data_settings() {
+    const api = globalThis.chrome?.browsingData;
+    if (!api) { throw new Error('oxichrome:no-permission'); }
+    return api.settings();
+}
+"#)]
+extern "C" {
+    #[wasm_bindgen(catch)]
+    pub fn browsing_data_clear(names: &js_sys::Array, since: f64, origins: &js_sys::Array, hosts: &js_sys::Array) -> Result<js_sys::Promise, JsValue>;
+    #[wasm_bindgen(catch)]
+    pub fn browsing_data_settings() -> Result<js_sys::Promise, JsValue>;
+}
+

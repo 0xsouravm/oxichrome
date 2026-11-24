@@ -1,6 +1,7 @@
 pub mod action;
 pub mod alarms;
 pub mod bookmarks;
+pub mod browsing_data;
 pub mod commands;
 pub mod context_menus;
 pub mod content_script;
