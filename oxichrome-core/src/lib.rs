@@ -8,6 +8,7 @@ pub mod commands;
 pub mod context_menus;
 pub mod content_script;
 pub mod content_settings;
+pub mod contextual_identities;
 pub mod cookies;
 pub mod devtools;
 pub mod declarative_content;
