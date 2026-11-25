@@ -77,7 +77,7 @@ fn track(relative: &str) -> TokenStream {
 }
 
 fn check_resource(relative: &str, span: proc_macro2::Span) -> syn::Result<TokenStream> {
-    if GENERATED_PAGES.contains(&relative) {
+    if GENERATED_PAGES.contains(&relative) || relative == crate::parse::FAVICON_RESOURCE {
         return Ok(TokenStream::new());
     }
     let root = static_root(span)?;

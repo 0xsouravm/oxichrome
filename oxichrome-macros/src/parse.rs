@@ -744,6 +744,15 @@ impl Parse for ExtensionArgs {
             }
         }
 
+        if let Some(path) = web_accessible.iter().find(|path| path.value().starts_with("_favicon")) {
+            if path.value() != FAVICON_RESOURCE {
+                return Err(syn::Error::new(path.span(), format!("write `{FAVICON_RESOURCE}`; Chrome serves every icon under it")));
+            }
+            if !permissions.iter().chain(&optional_permissions).any(|declared| declared.info.ident == "Favicon") {
+                return Err(syn::Error::new(path.span(), "`_favicon/*` is Chrome's icon cache; add `Favicon` to `permissions`"));
+            }
+        }
+
         if let Some(oauth2) = &oauth2 {
             if !permissions.iter().chain(&optional_permissions).any(|declared| declared.info.ident == "Identity") {
                 return Err(syn::Error::new(oauth2.client_id.span(), "`oauth2` is for `identity::google_token`; add `Identity` to `permissions`"));
@@ -812,6 +821,9 @@ fn parse_rule_sets(input: ParseStream) -> syn::Result<Vec<(Ident, LitStr)>> {
     }
     Ok(sets)
 }
+
+/// Chrome's icon cache, which `favicon::url` points into; it isn't a file in `static/`.
+pub const FAVICON_RESOURCE: &str = "_favicon/*";
 
 fn check_resource_path(path: &LitStr, what: &str) -> syn::Result<()> {
     let value = path.value();

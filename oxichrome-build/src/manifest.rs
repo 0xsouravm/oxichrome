@@ -53,6 +53,9 @@ struct Manifest {
     storage: Option<serde_json::Value>,
 }
 
+/// Chrome's icon cache; Firefox has none, so its builds leave it out.
+const FAVICON_RESOURCE: &str = "_favicon/*";
+
 /// Where the managed storage schema goes in a Chrome build.
 pub const MANAGED_SCHEMA_FILE: &str = "managed_schema.json";
 
@@ -292,9 +295,15 @@ pub fn generate_manifest(metadata: &ExtensionMetadata, browser: Browser) -> anyh
                 resources: vec!["wasm/*".to_string()],
                 matches: vec!["<all_urls>".to_string()],
             }];
-            if !metadata.web_accessible.is_empty() {
+            let listed: Vec<String> = metadata
+                .web_accessible
+                .iter()
+                .filter(|path| browser == Browser::Chromium || path.as_str() != FAVICON_RESOURCE)
+                .cloned()
+                .collect();
+            if !listed.is_empty() {
                 resources.push(WebAccessibleResource {
-                    resources: metadata.web_accessible.clone(),
+                    resources: listed,
                     matches: vec!["<all_urls>".to_string()],
                 });
             }
@@ -864,5 +873,19 @@ mod tests {
         assert_eq!(chrome["key"], "KEY");
         let firefox: serde_json::Value = serde_json::from_str(&generate_manifest(&metadata, Browser::Firefox).unwrap()).unwrap();
         assert!(firefox.get("oauth2").is_none() && firefox.get("key").is_none(), "{firefox}");
+    }
+
+    #[test]
+    fn the_icon_cache_is_chrome_only() {
+        let text = |paths: &str| format!(r#"{{"kind":"extension","name":"O","version":"1.0.0","description":null,"gecko_id":"o@example.com","permissions":["favicon"],"host_permissions":[],"icons":[],"action":null,"web_accessible":{paths}}}"#);
+        let resources = |paths: &str, browser| {
+            let metadata = crate::metadata::parse_entries(&text(paths)).unwrap();
+            let manifest: serde_json::Value = serde_json::from_str(&generate_manifest(&metadata, browser).unwrap()).unwrap();
+            manifest["web_accessible_resources"].as_array().unwrap().iter().map(|entry| entry["resources"].clone()).collect::<Vec<_>>()
+        };
+        let both = r#"["_favicon/*","pages/x.html"]"#;
+        assert_eq!(resources(both, Browser::Chromium), vec![serde_json::json!(["wasm/*"]), serde_json::json!(["_favicon/*", "pages/x.html"])]);
+        assert_eq!(resources(both, Browser::Firefox), vec![serde_json::json!(["wasm/*"]), serde_json::json!(["pages/x.html"])]);
+        assert_eq!(resources(r#"["_favicon/*"]"#, Browser::Firefox), vec![serde_json::json!(["wasm/*"])]);
     }
 }

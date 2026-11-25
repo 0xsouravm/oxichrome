@@ -19,6 +19,7 @@ pub use oxichrome_core::declarative_content;
 pub use oxichrome_core::desktop_capture;
 pub use oxichrome_core::declarative_net_request;
 pub use oxichrome_core::event;
+pub use oxichrome_core::favicon;
 pub use oxichrome_core::find;
 pub use oxichrome_core::history;
 pub use oxichrome_core::i18n;

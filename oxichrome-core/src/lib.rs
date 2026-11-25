@@ -19,6 +19,7 @@ pub mod dns;
 pub mod downloads;
 pub mod error;
 pub mod event;
+pub mod favicon;
 pub mod find;
 pub mod history;
 pub mod i18n;
