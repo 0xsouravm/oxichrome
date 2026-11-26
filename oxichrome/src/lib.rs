@@ -33,6 +33,7 @@ pub use oxichrome_core::omnibox;
 pub use oxichrome_core::page_capture;
 pub use oxichrome_core::permissions;
 pub use oxichrome_core::permissions::Permission;
+pub use oxichrome_core::power;
 pub use oxichrome_core::privacy;
 pub use oxichrome_core::proxy;
 pub use oxichrome_core::reading_list;

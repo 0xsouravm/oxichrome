@@ -28,12 +28,16 @@ pub(crate) fn only(only: Only, api: &str, instead: &str) -> Result<()> {
 /// `chrome.<path>.<method>(...args)`, awaited. `permission` names the `Permission` to add
 /// when the API isn't there.
 pub(crate) async fn call(path: &str, method: &str, args: &[JsValue], permission: &str) -> Result<JsValue> {
+    Ok(JsFuture::from(start(path, method, args, permission)?).await?)
+}
+
+/// [`call`] without waiting, for the APIs that answer at once.
+pub(crate) fn start(path: &str, method: &str, args: &[JsValue], permission: &str) -> Result<js_sys::Promise> {
     let args = js_sys::Array::from_iter(args);
     let missing = || {
         OxichromeError::InvalidArgument(format!("`{path}` isn't available here; add `{permission}` to `permissions` in #[oxichrome::extension]"))
     };
-    let promise = js_bridge::api_call(path, method, &args).map_err(|error| {
+    js_bridge::api_call(path, method, &args).map_err(|error| {
         if crate::error::JsError::new(error.clone()).to_string() == "oxichrome:no-permission" { missing() } else { error.into() }
-    })?;
-    Ok(JsFuture::from(promise).await?)
+    })
 }

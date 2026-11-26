@@ -33,6 +33,7 @@ pub mod offscreen;
 pub mod omnibox;
 pub mod page_capture;
 pub mod permissions;
+pub mod power;
 pub mod privacy;
 pub mod proxy;
 pub mod reading_list;
