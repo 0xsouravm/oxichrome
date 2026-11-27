@@ -28,6 +28,8 @@ pub struct Tab {
     pub opener_tab_id: Option<i32>,
     /// The tab group it's in, if any.
     pub group_id: Option<i64>,
+    /// Hidden from the tab strip by an extension with [`hide`]. Always `false` in Chrome.
+    pub hidden: bool,
 }
 
 #[derive(serde::Deserialize)]
@@ -56,6 +58,8 @@ struct RawTab {
     status: Option<String>,
     opener_tab_id: Option<i32>,
     group_id: Option<f64>,
+    #[serde(default)]
+    hidden: bool,
 }
 
 impl From<RawTab> for Tab {
@@ -76,6 +80,7 @@ impl From<RawTab> for Tab {
             status: if raw.discarded { Some("unloaded".to_string()) } else { raw.status },
             opener_tab_id: raw.opener_tab_id,
             group_id: raw.group_id.filter(|id| *id >= 0.0).map(|id| id as i64),
+            hidden: raw.hidden,
         }
     }
 }
@@ -182,6 +187,8 @@ pub struct Query {
     discarded: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     group_id: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    hidden: Option<bool>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     url: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -242,6 +249,13 @@ impl Query {
         self
     }
 
+    /// Only tabs [`hide`] has hidden (`true`) or only the ones in the tab strip (`false`).
+    /// Chrome hides no tabs, so there `true` matches nothing and `false` matches every tab.
+    pub fn hidden(mut self, hidden: bool) -> Self {
+        self.hidden = Some(hidden);
+        self
+    }
+
     /// Only tabs in this tab group.
     pub fn in_group(mut self, group_id: i64) -> Self {
         self.group_id = Some(group_id);
@@ -271,7 +285,15 @@ pub async fn active_tab() -> Result<Option<Tab>> {
 
 /// Finds tabs. Pass a [`Query`] and read them as [`Tab`]s, or pass and read your own types.
 pub async fn query<Q: Serialize, T: DeserializeOwned>(query_info: &Q) -> Result<Vec<T>> {
-    let js_query = crate::json::to_js(query_info)?;
+    let mut query_info = serde_json::to_value(query_info).map_err(|error| OxichromeError::Serde(error.to_string()))?;
+    if !js_bridge::is_firefox() {
+        if let Some(hidden) = query_info.as_object_mut().and_then(|query| query.remove("hidden")) {
+            if hidden == serde_json::Value::Bool(true) {
+                return Ok(Vec::new());
+            }
+        }
+    }
+    let js_query = crate::json::to_js(&query_info)?;
     let promise = js_bridge::chrome_tabs_query(&js_query)?;
     let result = JsFuture::from(promise).await?;
     let tabs: Vec<T> = crate::json::from_js(&result)?;
@@ -500,6 +522,45 @@ fn capture_error(err: JsValue) -> OxichromeError {
     OxichromeError::Js(JsError::new(JsValue::from_str(&message)))
 }
 
+/// Hides tabs from the tab strip and returns the ids it hid. Firefox only, with `TabHide` in
+/// `permissions`.
+///
+/// The active tab, pinned tabs and tabs already hidden are skipped, not refused. One unknown id
+/// fails the whole call and hides nothing. A hidden tab still runs and stays in [`query`] (see
+/// [`Query::hidden`]); it comes back when it's made active, when [`show`] is called, or when the
+/// extension is turned off. Firefox tells the user the first time an extension hides a tab.
+pub async fn hide(tab_ids: &[i32]) -> Result<Vec<i32>> {
+    crate::call::only(crate::call::Only::Firefox, "tabs.hide", HIDE_INSTEAD)?;
+    if tab_ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    crate::json::from_js(&visibility("hide", tab_ids).await?)
+}
+
+/// Puts hidden tabs back in the tab strip. Tabs that aren't hidden are left alone; one unknown
+/// id fails the whole call. Firefox only, with `TabHide` in `permissions`.
+pub async fn show(tab_ids: &[i32]) -> Result<()> {
+    crate::call::only(crate::call::Only::Firefox, "tabs.show", HIDE_INSTEAD)?;
+    if tab_ids.is_empty() {
+        return Ok(());
+    }
+    visibility("show", tab_ids).await.map(|_| ())
+}
+
+const HIDE_INSTEAD: &str = "Chrome can't hide tabs; put them in a tab group and collapse it instead";
+
+async fn visibility(method: &str, tab_ids: &[i32]) -> Result<JsValue> {
+    let ids = crate::json::to_js(tab_ids)?;
+    let promise = js_bridge::api_call("tabs", method, &js_sys::Array::of1(&ids)).map_err(|error| {
+        if JsError::new(error.clone()).to_string() == "oxichrome:no-permission" {
+            OxichromeError::InvalidArgument(format!("`tabs.{method}` needs `TabHide` in `permissions` in #[oxichrome::extension]"))
+        } else {
+            tab_error(error)
+        }
+    })?;
+    JsFuture::from(promise).await.map_err(tab_error)
+}
+
 /// Puts tabs in a new group in their window and returns the group id.
 pub async fn group(tab_ids: &[i32]) -> Result<i64> {
     group_with(tab_ids, serde_json::json!({})).await
@@ -541,13 +602,14 @@ mod query_tests {
     #[test]
     fn query_sends_only_what_was_set() {
         assert_eq!(serde_json::to_value(Query::new()).unwrap(), serde_json::json!({}));
-        let query = Query::new().active(true).in_current_window().url("https://*.example.com/*").url("*://rust-lang.org/*").in_group(4);
+        let query = Query::new().active(true).in_current_window().url("https://*.example.com/*").url("*://rust-lang.org/*").in_group(4).hidden(false);
         assert_eq!(
             serde_json::to_value(query).unwrap(),
             serde_json::json!({
                 "active": true,
                 "currentWindow": true,
                 "groupId": 4,
+                "hidden": false,
                 "url": ["https://*.example.com/*", "*://rust-lang.org/*"],
             })
         );
